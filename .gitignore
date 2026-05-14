@@ -1,0 +1,13 @@
+/target
+**/target
+Cargo.lock
+.env
+.env.*
+!.env.example
+node_modules
+.DS_Store
+*.log
+/apps/desktop/dist
+/apps/desktop/src-tauri/target
+# Tauri-generated schemas/artifacts (regenerated on build).
+/apps/desktop/src-tauri/gen
