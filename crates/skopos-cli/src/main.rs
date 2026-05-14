@@ -7,6 +7,8 @@ use skopos_core::UsageEvent;
 use skopos_store::SkoposStore;
 use std::{collections::BTreeMap, path::PathBuf};
 
+mod repl;
+
 #[derive(Debug, Parser)]
 #[command(name = "skopos")]
 #[command(about = "Skopos CLI control plane")]
@@ -72,6 +74,30 @@ enum ClaudeCommand {
         #[arg(long)]
         db: Option<PathBuf>,
     },
+    /// Show Claude usage for today (UTC). REPL alias: `claude -t`.
+    Today {
+        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Show Claude usage for the current week (UTC). REPL alias: `claude -w`.
+    Week {
+        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Show Claude usage for the current month (UTC). REPL alias: `claude -m`.
+    Month {
+        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Show Claude usage grouped by model. REPL alias: `claude models`.
+    Models {
+        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -79,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        None => print!("{}", welcome_screen(&default_db_path()).await),
+        None => repl::run(&default_db_path()).await?,
         Some(Command::Status) => println!("Skopos status: bootstrapped"),
         Some(Command::Doctor) => {
             println!("Skopos doctor");
@@ -121,6 +147,31 @@ async fn main() -> anyhow::Result<()> {
                 println!("inserted:   {}", report.inserted_events);
                 println!("duplicates: {}", report.duplicate_events);
             }
+            ClaudeCommand::Today { db } => {
+                let db_path = db.unwrap_or_else(default_db_path);
+                print!(
+                    "{}",
+                    usage_period_report(&db_path, UsagePeriod::Today).await?
+                );
+            }
+            ClaudeCommand::Week { db } => {
+                let db_path = db.unwrap_or_else(default_db_path);
+                print!(
+                    "{}",
+                    usage_period_report(&db_path, UsagePeriod::Week).await?
+                );
+            }
+            ClaudeCommand::Month { db } => {
+                let db_path = db.unwrap_or_else(default_db_path);
+                print!(
+                    "{}",
+                    usage_period_report(&db_path, UsagePeriod::Month).await?
+                );
+            }
+            ClaudeCommand::Models { db } => {
+                let db_path = db.unwrap_or_else(default_db_path);
+                print!("{}", usage_by_model_report(&db_path).await?);
+            }
         },
     }
 
@@ -129,10 +180,10 @@ async fn main() -> anyhow::Result<()> {
 
 const SKOPOS_ASCII: &str = include_str!("../assets/skopos-ascii.txt");
 
-/// Bright orange used for side-panel text, table headers and labels.
-const ORANGE: (u8, u8, u8) = (255, 167, 38);
+/// Bright purple used for side-panel text, table headers and labels.
+const PURPLE: (u8, u8, u8) = (189, 147, 249);
 
-async fn welcome_screen(db_path: &std::path::Path) -> String {
+pub(crate) async fn welcome_screen(db_path: &std::path::Path) -> String {
     let art_lines: Vec<&str> = SKOPOS_ASCII.trim_end_matches('\n').lines().collect();
     let info_lines = match usage_snapshot(db_path).await {
         Some(snapshot) => snapshot_info_lines(&snapshot),
@@ -147,7 +198,7 @@ async fn welcome_screen(db_path: &std::path::Path) -> String {
     let mut output = String::new();
 
     for (idx, art_line) in art_lines.iter().enumerate() {
-        output.push_str(&orange_gradient_line(art_line, idx, art_lines.len()));
+        output.push_str(&purple_gradient_line(art_line, idx, art_lines.len()));
         if let Some(info) = idx
             .checked_sub(info_start)
             .and_then(|line| info_lines.get(line))
@@ -176,8 +227,8 @@ enum InfoLine {
 impl InfoLine {
     fn render(&self) -> String {
         match self {
-            InfoLine::Head(text) => orange(text),
-            InfoLine::Title(text) => orange_bold(text),
+            InfoLine::Head(text) => purple(text),
+            InfoLine::Title(text) => purple_bold(text),
             InfoLine::Body(text) => dim(text),
             InfoLine::Blank => String::new(),
         }
@@ -235,11 +286,11 @@ fn empty_info_lines() -> Vec<InfoLine> {
     ]
 }
 
-fn orange_gradient_line(line: &str, index: usize, total_lines: usize) -> String {
+fn purple_gradient_line(line: &str, index: usize, total_lines: usize) -> String {
     let denominator = total_lines.saturating_sub(1).max(1) as f32;
     let t = index as f32 / denominator;
-    let start = (255.0, 214.0, 153.0);
-    let end = (204.0, 74.0, 4.0);
+    let start = (216.0, 180.0, 254.0);
+    let end = (76.0, 29.0, 149.0);
     let r = lerp(start.0, end.0, t).round() as u8;
     let g = lerp(start.1, end.1, t).round() as u8;
     let b = lerp(start.2, end.2, t).round() as u8;
@@ -250,21 +301,21 @@ fn rgb_text(text: &str, r: u8, g: u8, b: u8) -> String {
     format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
 }
 
-/// Bright-orange foreground text.
-fn orange(text: &str) -> String {
-    rgb_text(text, ORANGE.0, ORANGE.1, ORANGE.2)
+/// Bright-purple foreground text.
+pub(crate) fn purple(text: &str) -> String {
+    rgb_text(text, PURPLE.0, PURPLE.1, PURPLE.2)
 }
 
-/// Bold bright-orange foreground text.
-fn orange_bold(text: &str) -> String {
+/// Bold bright-purple foreground text.
+pub(crate) fn purple_bold(text: &str) -> String {
     format!(
         "\x1b[1m\x1b[38;2;{};{};{}m{text}\x1b[0m",
-        ORANGE.0, ORANGE.1, ORANGE.2
+        PURPLE.0, PURPLE.1, PURPLE.2
     )
 }
 
 /// Dimmed grey foreground text.
-fn dim(text: &str) -> String {
+pub(crate) fn dim(text: &str) -> String {
     rgb_text(text, 140, 140, 140)
 }
 
@@ -336,7 +387,7 @@ fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
     let total_width: usize = widths.iter().sum::<usize>() + 2 + (columns - 1) * 2;
 
     let mut out = String::new();
-    out.push_str(&orange(&format_row(&header_cells)));
+    out.push_str(&purple(&format_row(&header_cells)));
     out.push('\n');
     out.push_str(&dim(&format!(
         "  {}",
@@ -396,6 +447,13 @@ fn today_range(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     (start, start + chrono::Duration::days(1))
 }
 
+fn week_range(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
+    let (today_start, _) = today_range(now);
+    let days_since_monday = now.weekday().num_days_from_monday() as i64;
+    let start = today_start - chrono::Duration::days(days_since_monday);
+    (start, start + chrono::Duration::days(7))
+}
+
 fn month_range(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     let start = Utc
         .with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
@@ -450,13 +508,13 @@ fn scan_claude(path: Option<PathBuf>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn usage_by_model_report(db_path: impl Into<PathBuf>) -> anyhow::Result<String> {
+pub(crate) async fn usage_by_model_report(db_path: impl Into<PathBuf>) -> anyhow::Result<String> {
     let store = SkoposStore::connect_path(db_path.into()).await?;
     store.migrate().await?;
     let totals = store.usage_totals_by_model().await?;
 
     let mut report = String::new();
-    report.push_str(&orange_bold("Usage by model"));
+    report.push_str(&purple_bold("Usage by model"));
     report.push_str("\n\n");
 
     if totals.is_empty() {
@@ -488,7 +546,7 @@ async fn usage_by_model_report(db_path: impl Into<PathBuf>) -> anyhow::Result<St
     Ok(report)
 }
 
-async fn usage_period_report(
+pub(crate) async fn usage_period_report(
     db_path: impl Into<PathBuf>,
     period: UsagePeriod,
 ) -> anyhow::Result<String> {
@@ -498,9 +556,13 @@ async fn usage_period_report(
             let (start, end) = today_range(now);
             ("today", start, end)
         }
+        UsagePeriod::Week => {
+            let (start, end) = week_range(now);
+            ("this week", start, end)
+        }
         UsagePeriod::Month => {
             let (start, end) = month_range(now);
-            ("month", start, end)
+            ("this month", start, end)
         }
     };
 
@@ -509,7 +571,7 @@ async fn usage_period_report(
     let totals = store.usage_totals_between(start, end).await?;
 
     let mut report = String::new();
-    report.push_str(&orange_bold(&format!("Usage {label}")));
+    report.push_str(&purple_bold(&format!("Usage {label}")));
     report.push('\n');
     report.push_str(&dim(&format!(
         "  {} → {}",
@@ -528,7 +590,7 @@ async fn usage_period_report(
     for (label, value) in pairs {
         report.push_str(&format!(
             "  {}{:>10}\n",
-            orange(&format!("{label:<8}")),
+            purple(&format!("{label:<8}")),
             value,
         ));
     }
@@ -537,8 +599,9 @@ async fn usage_period_report(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum UsagePeriod {
+pub(crate) enum UsagePeriod {
     Today,
+    Week,
     Month,
 }
 
