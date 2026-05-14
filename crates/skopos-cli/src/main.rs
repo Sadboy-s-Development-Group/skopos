@@ -23,6 +23,12 @@ enum Command {
     Status,
     /// Print the planned local data paths.
     Doctor,
+    /// List AI providers tracked in the local store. REPL alias: `providers`.
+    Providers {
+        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
     /// Inspect persisted AI usage.
     Usage {
         #[command(subcommand)]
@@ -113,6 +119,10 @@ async fn main() -> anyhow::Result<()> {
             println!("data:   {}", default_db_path().display());
             println!("logs:   ~/.local/state/skopos/skopos.log");
         }
+        Some(Command::Providers { db }) => {
+            let db_path = db.unwrap_or_else(default_db_path);
+            print!("{}", providers_report(&db_path).await?);
+        }
         Some(Command::Usage { command }) => match command {
             UsageCommand::ByModel { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
@@ -183,33 +193,80 @@ const SKOPOS_ASCII: &str = include_str!("../assets/skopos-ascii.txt");
 /// Bright purple used for side-panel text, table headers and labels.
 const PURPLE: (u8, u8, u8) = (189, 147, 249);
 
-pub(crate) async fn welcome_screen(db_path: &std::path::Path) -> String {
+/// Horizontal gap between the ASCII art and the side panel.
+const SPLASH_GAP: usize = 4;
+
+/// Render the splash for the given terminal `width`, picking a responsive
+/// layout. The ASCII art is never scaled or truncated (curated asset); the
+/// layout adapts instead:
+/// - wide: art and panel side by side,
+/// - medium: art stacked above the panel,
+/// - narrow: panel only.
+pub(crate) fn welcome_screen(width: usize) -> String {
     let art_lines: Vec<&str> = SKOPOS_ASCII.trim_end_matches('\n').lines().collect();
-    let info_lines = match usage_snapshot(db_path).await {
-        Some(snapshot) => snapshot_info_lines(&snapshot),
-        None => empty_info_lines(),
-    };
-    let info_start = art_lines.len().saturating_sub(info_lines.len()) / 2;
+    let info_lines = panel_info_lines();
     let art_width = art_lines
         .iter()
         .map(|line| visible_width(line))
         .max()
         .unwrap_or(0);
-    let mut output = String::new();
+    let panel_width = info_lines
+        .iter()
+        .map(InfoLine::visible_len)
+        .max()
+        .unwrap_or(0);
 
+    if width >= art_width + SPLASH_GAP + panel_width {
+        render_splash_side_by_side(&art_lines, &info_lines, art_width)
+    } else if width >= art_width {
+        render_splash_stacked(&art_lines, &info_lines)
+    } else {
+        render_splash_compact(&info_lines)
+    }
+}
+
+fn render_splash_side_by_side(
+    art_lines: &[&str],
+    info_lines: &[InfoLine],
+    art_width: usize,
+) -> String {
+    let info_start = art_lines.len().saturating_sub(info_lines.len()) / 2;
+    let mut output = String::new();
     for (idx, art_line) in art_lines.iter().enumerate() {
         output.push_str(&purple_gradient_line(art_line, idx, art_lines.len()));
         if let Some(info) = idx
             .checked_sub(info_start)
             .and_then(|line| info_lines.get(line))
         {
-            let padding = art_width.saturating_sub(visible_width(art_line)) + 4;
+            let padding = art_width.saturating_sub(visible_width(art_line)) + SPLASH_GAP;
             output.push_str(&" ".repeat(padding));
             output.push_str(&info.render());
         }
         output.push('\n');
     }
+    output
+}
 
+fn render_splash_stacked(art_lines: &[&str], info_lines: &[InfoLine]) -> String {
+    let mut output = String::new();
+    for (idx, art_line) in art_lines.iter().enumerate() {
+        output.push_str(&purple_gradient_line(art_line, idx, art_lines.len()));
+        output.push('\n');
+    }
+    output.push('\n');
+    for info in info_lines {
+        output.push_str(&info.render());
+        output.push('\n');
+    }
+    output
+}
+
+fn render_splash_compact(info_lines: &[InfoLine]) -> String {
+    let mut output = String::new();
+    for info in info_lines {
+        output.push_str(&info.render());
+        output.push('\n');
+    }
     output
 }
 
@@ -233,53 +290,34 @@ impl InfoLine {
             InfoLine::Blank => String::new(),
         }
     }
-}
 
-fn snapshot_info_lines(snapshot: &UsageSnapshot) -> Vec<InfoLine> {
-    let mut lines = vec![
-        InfoLine::Title("Skopos".to_string()),
-        InfoLine::Body("local-first AI usage observability".to_string()),
-        InfoLine::Blank,
-        InfoLine::Head("This month".to_string()),
-        InfoLine::Body(format!(
-            "  {} tokens  ·  {} events",
-            human_tokens(snapshot.month.total_tokens),
-            thousands(snapshot.month.events),
-        )),
-        InfoLine::Blank,
-        InfoLine::Head("Today".to_string()),
-        InfoLine::Body(format!(
-            "  {} tokens  ·  {} events",
-            human_tokens(snapshot.today.total_tokens),
-            thousands(snapshot.today.events),
-        )),
-        InfoLine::Blank,
-        InfoLine::Head("Top models".to_string()),
-    ];
-    for model in &snapshot.top_models {
-        lines.push(InfoLine::Body(format!(
-            "  {:<26}{:>8}",
-            model.model,
-            human_tokens(model.total_tokens),
-        )));
+    /// Visible (uncoloured) width of the line, used to size the splash layout.
+    fn visible_len(&self) -> usize {
+        match self {
+            InfoLine::Head(text) | InfoLine::Title(text) | InfoLine::Body(text) => {
+                text.chars().count()
+            }
+            InfoLine::Blank => 0,
+        }
     }
-    lines.push(InfoLine::Blank);
-    lines.push(InfoLine::Body(
-        "skopos usage by-model · today · month".to_string(),
-    ));
-    lines
 }
 
-fn empty_info_lines() -> Vec<InfoLine> {
+/// Side-panel content for the splash: branding plus the command menu. New
+/// commands get a row here as they are added.
+fn panel_info_lines() -> Vec<InfoLine> {
+    let command = |name: &str, desc: &str| InfoLine::Body(format!("  {name:<16}{desc}"));
     vec![
         InfoLine::Title("Skopos".to_string()),
         InfoLine::Body("local-first AI usage observability".to_string()),
         InfoLine::Blank,
-        InfoLine::Head("No usage imported yet".to_string()),
-        InfoLine::Blank,
-        InfoLine::Head("Get started".to_string()),
-        InfoLine::Body("  skopos claude import".to_string()),
-        InfoLine::Body("  skopos usage by-model".to_string()),
+        InfoLine::Head("Commands".to_string()),
+        command("help", "list commands"),
+        command("claude -t/-w/-m", "usage by period"),
+        command("claude models", "usage by model"),
+        command("providers", "tracked providers"),
+        command("claude import", "import Claude logs"),
+        command("clear", "redraw splash"),
+        command("exit", "quit skopos"),
         InfoLine::Blank,
         InfoLine::Head("Data".to_string()),
         InfoLine::Body("  ~/.local/share/skopos/skopos.db".to_string()),
@@ -401,45 +439,6 @@ fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
     out
 }
 
-/// A glance at recent usage, used to populate the splash side panel.
-struct UsageSnapshot {
-    month: skopos_store::UsageTotals,
-    today: skopos_store::UsageTotals,
-    top_models: Vec<skopos_store::UsageModelTotal>,
-}
-
-/// Read a usage snapshot for the splash. Returns `None` when there is no
-/// database yet or it holds no events, so the splash never creates state.
-async fn usage_snapshot(db_path: &std::path::Path) -> Option<UsageSnapshot> {
-    if !db_path.exists() {
-        return None;
-    }
-    let store = SkoposStore::connect_path(db_path).await.ok()?;
-    let now = Utc::now();
-    let (month_start, month_end) = month_range(now);
-    let (today_start, today_end) = today_range(now);
-    let month = store
-        .usage_totals_between(month_start, month_end)
-        .await
-        .ok()?;
-    let today = store
-        .usage_totals_between(today_start, today_end)
-        .await
-        .ok()?;
-    let mut top_models = store.usage_totals_by_model().await.ok()?;
-    top_models.truncate(3);
-
-    if month.events == 0 && top_models.is_empty() {
-        return None;
-    }
-
-    Some(UsageSnapshot {
-        month,
-        today,
-        top_models,
-    })
-}
-
 fn today_range(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     let start = Utc
         .with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0)
@@ -506,6 +505,51 @@ fn scan_claude(path: Option<PathBuf>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+pub(crate) async fn providers_report(db_path: impl Into<PathBuf>) -> anyhow::Result<String> {
+    let store = SkoposStore::connect_path(db_path.into()).await?;
+    store.migrate().await?;
+    let totals = store.usage_totals_by_model().await?;
+
+    let mut report = String::new();
+    report.push_str(&purple_bold("Tracked providers"));
+    report.push_str("\n\n");
+
+    if totals.is_empty() {
+        report.push_str(&dim(
+            "  No usage imported yet — run: skopos claude import\n",
+        ));
+        return Ok(report);
+    }
+
+    // Roll the per-model rows up to one row per provider.
+    let mut by_provider: BTreeMap<String, (i64, i64, i64)> = BTreeMap::new();
+    for total in &totals {
+        let entry = by_provider.entry(total.provider.clone()).or_default();
+        entry.0 += 1;
+        entry.1 += total.events;
+        entry.2 += total.total_tokens;
+    }
+
+    let rows: Vec<Vec<String>> = by_provider
+        .into_iter()
+        .map(|(provider, (models, events, tokens))| {
+            vec![
+                provider,
+                models.to_string(),
+                thousands(events),
+                human_tokens(tokens),
+            ]
+        })
+        .collect();
+
+    report.push_str(&render_table(
+        &["PROVIDER", "MODELS", "EVENTS", "TOTAL"],
+        &rows,
+    ));
+
+    Ok(report)
 }
 
 pub(crate) async fn usage_by_model_report(db_path: impl Into<PathBuf>) -> anyhow::Result<String> {

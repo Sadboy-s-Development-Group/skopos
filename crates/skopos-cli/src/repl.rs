@@ -1,9 +1,13 @@
 //! Interactive Skopos shell: prints the splash, then drives a live-redrawn
-//! bordered input box (crossterm raw mode) where the user types `claude`
-//! commands. Results print above the box; a fresh box is drawn below.
+//! bordered input box (crossterm raw mode) where the user types commands.
+//! Results print above the box; a fresh box is drawn below.
+//!
+//! The box spans the full terminal width and re-fits on resize. While the
+//! splash is still the only thing on screen, a resize also reflows it.
 
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use crossterm::{
     cursor,
@@ -13,65 +17,91 @@ use crossterm::{
     terminal::{self, Clear, ClearType},
 };
 
-use crate::{dim, purple, purple_bold, usage_by_model_report, usage_period_report, UsagePeriod};
+use crate::{
+    dim, providers_report, purple, purple_bold, usage_by_model_report, usage_period_report,
+    UsagePeriod,
+};
 
 /// Run the interactive Skopos shell against `db_path`.
 ///
 /// When stdin is not a terminal (piped/redirected) we cannot enter raw mode,
 /// so we just print the splash once and return.
 pub(crate) async fn run(db_path: &Path) -> anyhow::Result<()> {
-    print_splash(db_path).await;
+    print_splash();
 
     if !io::stdin().is_terminal() {
         return Ok(());
     }
 
     let mut input = InputBox::new();
+    // `fresh_screen`: the splash is still the only thing on screen, so a
+    // resize can clear and reflow it. `fresh_line`: start the next read with
+    // an empty buffer — `false` resumes the buffer after a resize.
+    let mut fresh_screen = true;
+    let mut fresh_line = true;
+
     loop {
-        let line = match input.read_line()? {
-            Some(line) => line,
-            None => {
+        match input.read_line(fresh_line)? {
+            ReadOutcome::Eof => {
                 println!();
                 break;
             }
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        println!("{}", dim(&format!("  › {trimmed}")));
-        match parse_command(trimmed) {
-            Command::Exit => break,
-            Command::Help => print!("{}", help_text()),
-            Command::Clear => {
-                execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-                print_splash(db_path).await;
+            ReadOutcome::Resized => {
+                if fresh_screen {
+                    execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+                    print_splash();
+                }
+                fresh_line = false;
                 continue;
             }
-            Command::Models => match usage_by_model_report(db_path).await {
-                Ok(report) => print!("{report}"),
-                Err(error) => println!("{}", dim(&format!("  error: {error}"))),
-            },
-            Command::Period(period) => match usage_period_report(db_path, period).await {
-                Ok(report) => print!("{report}"),
-                Err(error) => println!("{}", dim(&format!("  error: {error}"))),
-            },
-            Command::Unknown(raw) => {
-                println!(
-                    "{}",
-                    dim(&format!("  unknown command: {raw} — type 'help'"))
-                );
+            ReadOutcome::Line(line) => {
+                fresh_line = true;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                println!("{}", dim(&format!("  › {trimmed}")));
+                match parse_command(trimmed) {
+                    Command::Exit => break,
+                    Command::Help => print!("{}", help_text()),
+                    Command::Clear => {
+                        execute!(io::stdout(), Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+                        print_splash();
+                        fresh_screen = true;
+                        continue;
+                    }
+                    Command::Providers => report_or_error(providers_report(db_path).await),
+                    Command::Models => report_or_error(usage_by_model_report(db_path).await),
+                    Command::Period(period) => {
+                        report_or_error(usage_period_report(db_path, period).await)
+                    }
+                    Command::Unknown(raw) => {
+                        println!(
+                            "{}",
+                            dim(&format!("  unknown command: {raw} — type 'help'"))
+                        );
+                    }
+                }
+                fresh_screen = false;
+                println!();
             }
         }
-        println!();
     }
 
     Ok(())
 }
 
-async fn print_splash(db_path: &Path) {
-    print!("{}", crate::welcome_screen(db_path).await);
+fn report_or_error(result: anyhow::Result<String>) {
+    match result {
+        Ok(report) => print!("{report}"),
+        Err(error) => println!("{}", dim(&format!("  error: {error}"))),
+    }
+}
+
+fn print_splash() {
+    let width = terminal::size().map(|(c, _)| c as usize).unwrap_or(80);
+    print!("{}", crate::welcome_screen(width));
     println!();
 }
 
@@ -83,6 +113,7 @@ enum Command {
     Exit,
     Help,
     Clear,
+    Providers,
     Models,
     Period(UsagePeriod),
     Unknown(String),
@@ -94,6 +125,7 @@ fn parse_command(input: &str) -> Command {
         ["exit"] | ["quit"] | ["q"] => Command::Exit,
         ["help"] | ["h"] | ["?"] => Command::Help,
         ["clear"] | ["cls"] => Command::Clear,
+        ["providers"] | ["p"] => Command::Providers,
         ["claude", rest @ ..] => parse_claude(rest),
         _ => Command::Unknown(input.to_string()),
     }
@@ -118,6 +150,11 @@ fn help_text() -> String {
         ("claude -w", "usage this week"),
         ("claude -m", "usage this month"),
         ("claude models", "usage grouped by model"),
+        ("providers", "list tracked providers"),
+        (
+            "claude import",
+            "import Claude Code logs (run: skopos claude import)",
+        ),
         ("clear", "clear the screen and redraw the splash"),
         ("help", "show this help"),
         ("exit / quit", "leave skopos"),
@@ -139,15 +176,26 @@ fn help_text() -> String {
 const INPUT_COL: usize = 4;
 /// Box overhead around the editable text: borders + `│ › ` + ` │`.
 const BOX_OVERHEAD: usize = 6;
-const MIN_BOX_WIDTH: usize = 24;
-const MAX_BOX_WIDTH: usize = 76;
-const HINT: &str = "  -t today  ·  -w week  ·  -m month  ·  models";
+/// Smallest box we will draw; below this a terminal is too narrow to use.
+const MIN_BOX_WIDTH: usize = 20;
+const HINT: &str = "  -t today  ·  -w week  ·  -m month  ·  models  ·  providers";
+
+/// What a `read_line` call ended with.
+enum ReadOutcome {
+    /// The user submitted a line.
+    Line(String),
+    /// Ctrl+C, or Ctrl+D on an empty buffer.
+    Eof,
+    /// The terminal was resized; the caller decides what to reflow.
+    Resized,
+}
 
 /// A live-redrawn, single-line input box with history and horizontal scroll.
 ///
-/// The box owns four terminal rows (top border, input, bottom border, hint).
-/// Every `draw` leaves the cursor on the input row; every redraw starts by
-/// stepping back up to the top border, so the box stays anchored in place.
+/// The box owns four terminal rows (top border, input, bottom border, hint)
+/// and spans the full terminal width. Every `draw` leaves the cursor on the
+/// input row; every redraw steps back up to the top border first, so the box
+/// stays anchored in place.
 struct InputBox {
     width: usize,
     buf: Vec<char>,
@@ -160,7 +208,7 @@ struct InputBox {
 impl InputBox {
     fn new() -> Self {
         Self {
-            width: MAX_BOX_WIDTH,
+            width: 80,
             buf: Vec::new(),
             cursor: 0,
             scroll: 0,
@@ -174,32 +222,36 @@ impl InputBox {
         self.width.saturating_sub(BOX_OVERHEAD)
     }
 
+    /// Resize the box to the full terminal width.
     fn refresh_width(&mut self) {
         let cols = terminal::size().map(|(c, _)| c as usize).unwrap_or(80);
-        self.width = cols.clamp(MIN_BOX_WIDTH, MAX_BOX_WIDTH);
+        self.width = cols.max(MIN_BOX_WIDTH);
     }
 
-    /// Read one line. Returns `Ok(None)` on Ctrl+C, or Ctrl+D on an empty line.
-    /// Raw mode is always restored, even on error.
-    fn read_line(&mut self) -> io::Result<Option<String>> {
+    /// Read one line. `fresh` starts with an empty buffer; `false` resumes the
+    /// current buffer (used to continue editing after a resize). Raw mode is
+    /// always restored, even on error.
+    fn read_line(&mut self, fresh: bool) -> io::Result<ReadOutcome> {
         terminal::enable_raw_mode()?;
+        if fresh {
+            self.buf.clear();
+            self.cursor = 0;
+            self.scroll = 0;
+            self.history_idx = None;
+        }
         let result = self.read_line_inner();
         let _ = self.erase();
         let _ = terminal::disable_raw_mode();
-        let result = result?;
-        if let Some(line) = &result {
+        let outcome = result?;
+        if let ReadOutcome::Line(line) = &outcome {
             if !line.trim().is_empty() {
                 self.history.push(line.clone());
             }
         }
-        Ok(result)
+        Ok(outcome)
     }
 
-    fn read_line_inner(&mut self) -> io::Result<Option<String>> {
-        self.buf.clear();
-        self.cursor = 0;
-        self.scroll = 0;
-        self.history_idx = None;
+    fn read_line_inner(&mut self) -> io::Result<ReadOutcome> {
         self.refresh_width();
         self.draw(true)?;
 
@@ -207,11 +259,13 @@ impl InputBox {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     match (key.code, key.modifiers) {
-                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(None),
+                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(ReadOutcome::Eof),
                         (KeyCode::Char('d'), KeyModifiers::CONTROL) if self.buf.is_empty() => {
-                            return Ok(None)
+                            return Ok(ReadOutcome::Eof)
                         }
-                        (KeyCode::Enter, _) => return Ok(Some(self.buf.iter().collect())),
+                        (KeyCode::Enter, _) => {
+                            return Ok(ReadOutcome::Line(self.buf.iter().collect()))
+                        }
                         (KeyCode::Backspace, _) if self.cursor > 0 => {
                             self.cursor -= 1;
                             self.buf.remove(self.cursor);
@@ -238,8 +292,13 @@ impl InputBox {
                     self.draw(false)?;
                 }
                 Event::Resize(_, _) => {
-                    self.refresh_width();
-                    self.draw(false)?;
+                    // Coalesce a burst of resize events from a window drag.
+                    while event::poll(Duration::ZERO)? {
+                        if !matches!(event::read()?, Event::Resize(_, _)) {
+                            break;
+                        }
+                    }
+                    return Ok(ReadOutcome::Resized);
                 }
                 _ => {}
             }
@@ -298,6 +357,7 @@ impl InputBox {
         let pad = " ".repeat(area - visible_len);
         let bar = purple("│");
         let input_line = format!("{bar} {} {visible}{pad} {bar}", purple("›"));
+        let hint: String = HINT.chars().take(self.width).collect();
 
         let mut out = io::stdout();
         if !first {
@@ -315,25 +375,24 @@ impl InputBox {
             Print(purple(&bottom)),
             Print("\r\n"),
             Clear(ClearType::CurrentLine),
-            Print(dim(HINT)),
+            Print(dim(&hint)),
         )?;
         let col = (INPUT_COL + self.cursor - self.scroll) as u16;
         queue!(out, cursor::MoveUp(2), cursor::MoveToColumn(col))?;
         out.flush()
     }
 
-    /// Wipe the four box rows, leaving the cursor where the box began so the
-    /// caller's output takes its place.
+    /// Wipe the box (and anything below it), leaving the cursor where the box
+    /// began so the caller's output takes its place. Clearing from the cursor
+    /// down also tidies up fragments left by a shrink-resize.
     fn erase(&mut self) -> io::Result<()> {
         let mut out = io::stdout();
-        queue!(out, cursor::MoveToColumn(0), cursor::MoveUp(1))?;
-        for row in 0..4 {
-            queue!(out, Clear(ClearType::CurrentLine))?;
-            if row < 3 {
-                queue!(out, cursor::MoveDown(1))?;
-            }
-        }
-        queue!(out, cursor::MoveUp(3), cursor::MoveToColumn(0))?;
+        queue!(
+            out,
+            cursor::MoveToColumn(0),
+            cursor::MoveUp(1),
+            Clear(ClearType::FromCursorDown),
+        )?;
         out.flush()
     }
 }
@@ -365,6 +424,7 @@ mod tests {
         assert!(matches!(parse_command("quit"), Command::Exit));
         assert!(matches!(parse_command("help"), Command::Help));
         assert!(matches!(parse_command("clear"), Command::Clear));
+        assert!(matches!(parse_command("providers"), Command::Providers));
     }
 
     #[test]
