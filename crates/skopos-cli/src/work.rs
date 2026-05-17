@@ -21,6 +21,7 @@ use crossterm::{
 
 use crate::config::Config;
 use crate::dim;
+use crate::icons::{self, ProjectIcon};
 use crate::providers::{self, ProviderId};
 
 /// Hint footer shown under the picker.
@@ -67,8 +68,17 @@ pub(crate) fn run(
     }
 }
 
-/// Sorted list of immediate, non-hidden subdirectories of `root`.
-fn list_projects(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
+/// A single row in the picker: a project path plus the cached icon we
+/// computed for it. We do the icon detection once at listing time so the
+/// draw loop is just lookups.
+struct Project {
+    path: PathBuf,
+    icon: ProjectIcon,
+}
+
+/// Sorted list of immediate, non-hidden subdirectories of `root`, each
+/// with its detected project icon.
+fn list_projects(root: &Path) -> anyhow::Result<Vec<Project>> {
     let mut out = Vec::new();
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
@@ -92,13 +102,15 @@ fn list_projects(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
         if !path.is_dir() {
             continue;
         }
-        out.push(path);
+        let icon = icons::detect(&path);
+        out.push(Project { path, icon });
     }
     out.sort_by(|a, b| {
-        a.file_name()
+        a.path
+            .file_name()
             .unwrap_or_default()
             .to_ascii_lowercase()
-            .cmp(&b.file_name().unwrap_or_default().to_ascii_lowercase())
+            .cmp(&b.path.file_name().unwrap_or_default().to_ascii_lowercase())
     });
     Ok(out)
 }
@@ -113,7 +125,7 @@ enum PickOutcome {
 
 struct Picker {
     root: PathBuf,
-    projects: Vec<PathBuf>,
+    projects: Vec<Project>,
     cursor: usize,
     scroll: usize,
     provider: ProviderId,
@@ -155,7 +167,7 @@ impl Picker {
                         (KeyCode::BackTab, _) => self.cycle_provider(-1),
                         (KeyCode::Enter, _) => {
                             return Ok(PickOutcome::Selected {
-                                project: self.projects[self.cursor].clone(),
+                                project: self.projects[self.cursor].path.clone(),
                                 provider: self.provider,
                             });
                         }
@@ -217,21 +229,34 @@ impl Picker {
         lines.push(header_line);
         lines.push(String::new());
 
-        for (offset, idx) in (self.scroll..(self.scroll + viewport)).enumerate() {
-            let _ = offset;
+        // Row layout, where ▶/space + icon + name share fixed leading
+        // columns so active/inactive rows align vertically.
+        //   active  : "  ▶  ICON  NAME …pad…"  ← background = accent
+        //   inactive: "     ICON  NAME"        ← icon coloured, name dim
+        // Visible prefix budget before the name: 2 (indent) + 1 (caret) +
+        //   2 (spaces) + 1 (icon) + 2 (spaces) = 8 cells.
+        let name_budget = (cols as usize).saturating_sub(8).max(8);
+
+        for idx in self.scroll..(self.scroll + viewport) {
             if idx >= self.projects.len() {
                 lines.push(String::new());
                 continue;
             }
             let project = &self.projects[idx];
-            let name = project.file_name().and_then(|s| s.to_str()).unwrap_or("?");
-            let truncated = truncate(name, cols.saturating_sub(6) as usize);
+            let name = project
+                .path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?");
+            let truncated = truncate(name, name_budget);
+            let icon = project.icon;
+
             if idx == self.cursor {
-                let caret = rgb_text("›", accent.0, accent.1, accent.2, None);
-                let label = rgb_text(&truncated, accent.0, accent.1, accent.2, None);
-                lines.push(format!("  {caret} {label}"));
+                lines.push(active_row(&truncated, icon, accent));
             } else {
-                lines.push(format!("    {}", dim(&truncated)));
+                let icon_glyph =
+                    rgb_text(icon.glyph, icon.color.0, icon.color.1, icon.color.2, None);
+                lines.push(format!("     {icon_glyph}  {}", dim(&truncated)));
             }
         }
 
@@ -353,6 +378,25 @@ fn rgb_text(text: &str, r: u8, g: u8, b: u8, bg: Option<(u8, u8, u8)>) -> String
     }
 }
 
+/// Render the active row as a non-filled highlight: caret + bold,
+/// underlined name in the provider's accent colour. The icon keeps its
+/// type colour so the project's language is still legible at a glance.
+fn active_row(name: &str, icon: ProjectIcon, accent: (u8, u8, u8)) -> String {
+    format!(
+        "  \x1b[1m\x1b[38;2;{};{};{}m▶\x1b[0m  \x1b[38;2;{};{};{}m{}\x1b[0m  \x1b[1m\x1b[4m\x1b[38;2;{};{};{}m{name}\x1b[0m",
+        accent.0,
+        accent.1,
+        accent.2,
+        icon.color.0,
+        icon.color.1,
+        icon.color.2,
+        icon.glyph,
+        accent.0,
+        accent.1,
+        accent.2,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,7 +414,7 @@ mod tests {
         let projects = list_projects(&dir).unwrap();
         let names: Vec<String> = projects
             .iter()
-            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .map(|p| p.path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, vec!["alpha", "beta"]);
     }

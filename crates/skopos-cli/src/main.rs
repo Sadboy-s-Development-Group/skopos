@@ -9,6 +9,7 @@ use skopos_store::SkoposStore;
 use std::{collections::BTreeMap, path::PathBuf};
 
 mod config;
+mod icons;
 mod providers;
 mod repl;
 mod work;
