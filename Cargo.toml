@@ -28,6 +28,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid", "json"] }
 clap = { version = "4", features = ["derive", "env"] }
 crossterm = "0.28"
+toml = "0.8"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 

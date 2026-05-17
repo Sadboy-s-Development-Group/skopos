@@ -18,8 +18,8 @@ use crossterm::{
 };
 
 use crate::{
-    dim, providers_report, purple, purple_bold, usage_by_model_report, usage_period_report,
-    UsagePeriod,
+    config, dim, providers_report, purple, purple_bold, usage_by_model_report, usage_period_report,
+    work, UsagePeriod,
 };
 
 /// Run the interactive Skopos shell against `db_path`.
@@ -76,6 +76,16 @@ pub(crate) async fn run(db_path: &Path) -> anyhow::Result<()> {
                     Command::Period(period) => {
                         report_or_error(usage_period_report(db_path, period).await)
                     }
+                    Command::Work => match config::load() {
+                        Ok(cfg) => {
+                            if let Err(error) = work::run(&cfg, None, None) {
+                                println!("{}", dim(&format!("  error: {error}")));
+                            }
+                        }
+                        Err(error) => {
+                            println!("{}", dim(&format!("  config error: {error}")));
+                        }
+                    },
                     Command::Unknown(raw) => {
                         println!(
                             "{}",
@@ -116,6 +126,7 @@ enum Command {
     Providers,
     Models,
     Period(UsagePeriod),
+    Work,
     Unknown(String),
 }
 
@@ -126,6 +137,7 @@ fn parse_command(input: &str) -> Command {
         ["help"] | ["h"] | ["?"] => Command::Help,
         ["clear"] | ["cls"] => Command::Clear,
         ["providers"] | ["p"] => Command::Providers,
+        ["work"] | ["w"] => Command::Work,
         ["claude", rest @ ..] => parse_claude(rest),
         _ => Command::Unknown(input.to_string()),
     }
@@ -146,6 +158,7 @@ fn help_text() -> String {
     out.push_str(&purple_bold("Commands"));
     out.push('\n');
     for (cmd, desc) in [
+        ("work", "pick a project and launch the agentic CLI"),
         ("claude -t", "usage today"),
         ("claude -w", "usage this week"),
         ("claude -m", "usage this month"),
@@ -178,7 +191,7 @@ const INPUT_COL: usize = 4;
 const BOX_OVERHEAD: usize = 6;
 /// Smallest box we will draw; below this a terminal is too narrow to use.
 const MIN_BOX_WIDTH: usize = 20;
-const HINT: &str = "  -t today  ·  -w week  ·  -m month  ·  models  ·  providers";
+const HINT: &str = "  work  ·  -t today  ·  -w week  ·  -m month  ·  models  ·  providers";
 
 /// What a `read_line` call ended with.
 enum ReadOutcome {

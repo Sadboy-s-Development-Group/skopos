@@ -1,5 +1,6 @@
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use clap::{Parser, Subcommand};
+use providers::ProviderId;
 use skopos_collectors::claude_code::{
     discover_claude_code_jsonl_paths, parse_usage_events_from_jsonl_path,
 };
@@ -7,7 +8,10 @@ use skopos_core::UsageEvent;
 use skopos_store::SkoposStore;
 use std::{collections::BTreeMap, path::PathBuf};
 
+mod config;
+mod providers;
 mod repl;
+mod work;
 
 #[derive(Debug, Parser)]
 #[command(name = "skopos")]
@@ -38,6 +42,15 @@ enum Command {
     Claude {
         #[command(subcommand)]
         command: ClaudeCommand,
+    },
+    /// Pick a project and hand the terminal over to an agentic CLI.
+    Work {
+        /// Provider to launch. Defaults to the one in ~/.config/skopos/config.toml.
+        #[arg(long)]
+        provider: Option<ProviderId>,
+        /// Project root to list. Defaults to the one in ~/.config/skopos/config.toml.
+        #[arg(long)]
+        root: Option<PathBuf>,
     },
 }
 
@@ -183,6 +196,10 @@ async fn main() -> anyhow::Result<()> {
                 print!("{}", usage_by_model_report(&db_path).await?);
             }
         },
+        Some(Command::Work { provider, root }) => {
+            let cfg = config::load()?;
+            work::run(&cfg, provider, root)?;
+        }
     }
 
     Ok(())
@@ -312,6 +329,7 @@ fn panel_info_lines() -> Vec<InfoLine> {
         InfoLine::Blank,
         InfoLine::Head("Commands".to_string()),
         command("help", "list commands"),
+        command("work", "pick a project, launch CLI"),
         command("claude -t/-w/-m", "usage by period"),
         command("claude models", "usage by model"),
         command("providers", "tracked providers"),
