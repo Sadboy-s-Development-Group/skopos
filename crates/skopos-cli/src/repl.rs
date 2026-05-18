@@ -18,8 +18,8 @@ use crossterm::{
 };
 
 use crate::{
-    config, dim, providers_report, purple, purple_bold, usage_by_model_report, usage_period_report,
-    work, UsagePeriod,
+    config, dim, providers_report, purple, purple_bold, usage_by_model_report,
+    usage_limits_report, usage_period_report, work, UsagePeriod,
 };
 
 /// Run the interactive Skopos shell against `db_path`.
@@ -76,6 +76,15 @@ pub(crate) async fn run(db_path: &Path) -> anyhow::Result<()> {
                     Command::Period(period) => {
                         report_or_error(usage_period_report(db_path, period).await)
                     }
+                    Command::Usage => report_or_error(usage_limits_report()),
+                    Command::UsageInstallHint => {
+                        println!(
+                            "{}",
+                            dim(
+                                "  run from the shell: `skopos usage install` (modifies ~/.claude/settings.json)"
+                            )
+                        );
+                    }
                     Command::Work => match config::load() {
                         Ok(cfg) => {
                             if let Err(error) = work::run(&cfg, None, None) {
@@ -127,6 +136,8 @@ enum Command {
     Models,
     Period(UsagePeriod),
     Work,
+    Usage,
+    UsageInstallHint,
     Unknown(String),
 }
 
@@ -138,6 +149,8 @@ fn parse_command(input: &str) -> Command {
         ["clear"] | ["cls"] => Command::Clear,
         ["providers"] | ["p"] => Command::Providers,
         ["work"] | ["w"] => Command::Work,
+        ["usage"] | ["u"] => Command::Usage,
+        ["usage", "install"] | ["usage", "uninstall"] => Command::UsageInstallHint,
         ["claude", rest @ ..] => parse_claude(rest),
         _ => Command::Unknown(input.to_string()),
     }
@@ -159,9 +172,11 @@ fn help_text() -> String {
     out.push('\n');
     for (cmd, desc) in [
         ("work", "pick a project and launch the agentic CLI"),
-        ("claude -t", "usage today"),
-        ("claude -w", "usage this week"),
-        ("claude -m", "usage this month"),
+        ("usage", "5h / weekly rate-limit bars per provider"),
+        ("usage install", "register statusline hook (run from shell)"),
+        ("claude -t", "usage today (token totals)"),
+        ("claude -w", "usage this week (token totals)"),
+        ("claude -m", "usage this month (token totals)"),
         ("claude models", "usage grouped by model"),
         ("providers", "list tracked providers"),
         (
@@ -191,7 +206,8 @@ const INPUT_COL: usize = 4;
 const BOX_OVERHEAD: usize = 6;
 /// Smallest box we will draw; below this a terminal is too narrow to use.
 const MIN_BOX_WIDTH: usize = 20;
-const HINT: &str = "  work  ·  -t today  ·  -w week  ·  -m month  ·  models  ·  providers";
+const HINT: &str =
+    "  work  ·  usage  ·  -t today  ·  -w week  ·  -m month  ·  models  ·  providers";
 
 /// What a `read_line` call ended with.
 enum ReadOutcome {

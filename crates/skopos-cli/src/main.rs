@@ -10,6 +10,9 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 mod config;
 mod icons;
+mod install;
+mod limits;
+mod local_usage;
 mod providers;
 mod repl;
 mod work;
@@ -34,10 +37,11 @@ enum Command {
         #[arg(long)]
         db: Option<PathBuf>,
     },
-    /// Inspect persisted AI usage.
+    /// Inspect persisted AI usage. With no subcommand, shows rate-limit
+    /// progress bars per provider (from the statusline snapshot).
     Usage {
         #[command(subcommand)]
-        command: UsageCommand,
+        command: Option<UsageCommand>,
     },
     /// Inspect or import Claude Code local usage logs.
     Claude {
@@ -53,6 +57,11 @@ enum Command {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+    /// Read the statusline JSON Claude Code pipes on stdin, persist the
+    /// rate-limit snapshot, and print a compact one-line view. Registered
+    /// by `skopos usage install`; not meant to be invoked by hand.
+    #[command(hide = true)]
+    Statusline,
 }
 
 #[derive(Debug, Subcommand)]
@@ -74,6 +83,19 @@ enum UsageCommand {
         /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
         #[arg(long)]
         db: Option<PathBuf>,
+    },
+    /// Register the Skopos statusline hook in ~/.claude/settings.json so
+    /// rate-limit % data is captured while Claude Code runs.
+    Install {
+        /// Replace an existing statusLine hook if one is already set.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Remove the Skopos statusline hook from ~/.claude/settings.json.
+    Uninstall {
+        /// Remove whatever statusLine is configured, even if it isn't ours.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -138,23 +160,30 @@ async fn main() -> anyhow::Result<()> {
             print!("{}", providers_report(&db_path).await?);
         }
         Some(Command::Usage { command }) => match command {
-            UsageCommand::ByModel { db } => {
+            None => print!("{}", usage_limits_report()?),
+            Some(UsageCommand::ByModel { db }) => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!("{}", usage_by_model_report(&db_path).await?);
             }
-            UsageCommand::Today { db } => {
+            Some(UsageCommand::Today { db }) => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!(
                     "{}",
                     usage_period_report(&db_path, UsagePeriod::Today).await?
                 );
             }
-            UsageCommand::Month { db } => {
+            Some(UsageCommand::Month { db }) => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!(
                     "{}",
                     usage_period_report(&db_path, UsagePeriod::Month).await?
                 );
+            }
+            Some(UsageCommand::Install { force }) => {
+                print!("{}", run_install(force)?);
+            }
+            Some(UsageCommand::Uninstall { force }) => {
+                print!("{}", run_uninstall(force)?);
             }
         },
         Some(Command::Claude { command }) => match command {
@@ -201,9 +230,126 @@ async fn main() -> anyhow::Result<()> {
             let cfg = config::load()?;
             work::run(&cfg, provider, root)?;
         }
+        Some(Command::Statusline) => run_statusline()?,
     }
 
     Ok(())
+}
+
+// ===========================================================================
+// Usage / statusline subcommand handlers
+// ===========================================================================
+
+/// `skopos usage` (no subcommand): two blocks per host —
+/// 1. **Current Session** from the statusline snapshot (live Claude Code state).
+/// 2. **Local Activity** from `~/.claude/projects/**/*.jsonl` (last 5h / 7d
+///    absolute token counts).
+///
+/// Anthropic does not expose the per-account 5h/7d quota % to third-party
+/// tools, and reading their OAuth-only endpoint would violate the Consumer
+/// Terms — so we deliberately do not show a % bar for the windowed totals.
+pub(crate) fn usage_limits_report() -> anyhow::Result<String> {
+    let snapshot = limits::load_snapshot(&limits::snapshot_path())?;
+    let now = Utc::now();
+    let local = local_usage::aggregate(&limits::claude_home(), now)?;
+
+    let mut out = String::new();
+    out.push_str(&purple_bold("Usage"));
+    out.push_str("\n\n");
+    out.push_str(&limits::render_limits_block(snapshot.as_ref(), now));
+    out.push('\n');
+    out.push_str(&limits::render_session_block(snapshot.as_ref(), now));
+    out.push('\n');
+    out.push_str(&local_usage::render_local_block(&local));
+    Ok(out)
+}
+
+/// `skopos statusline`: receive Claude Code's JSON on stdin, persist the
+/// snapshot, and print a single line back so Claude Code has something to
+/// show above the prompt.
+fn run_statusline() -> anyhow::Result<()> {
+    let payload = limits::read_stdin_to_string(std::io::stdin())?;
+    // Always keep a copy of the last raw payload — useful when the schema
+    // drifts between Claude Code versions and parsing yields empty windows.
+    let _ = limits::save_last_payload(&payload);
+    let (plan, tier) = limits::read_plan_labels(&limits::claude_credentials_path());
+    let snapshot = limits::snapshot_from_statusline_json(&payload, plan, tier, Utc::now())?;
+    limits::save_snapshot(&limits::snapshot_path(), &snapshot)?;
+    // Stdout becomes Claude Code's statusline. Newline-free per spec.
+    print!("{}", limits::render_statusline_line(&snapshot));
+    Ok(())
+}
+
+/// `skopos usage install`: register the statusline hook, with backup.
+fn run_install(force: bool) -> anyhow::Result<String> {
+    let settings = install::default_settings_path();
+    let binary = install::skopos_binary_path();
+    let outcome = install::install(&settings, &binary, force)?;
+    let mut out = String::new();
+    out.push_str(&purple_bold("Install statusline hook"));
+    out.push_str("\n\n");
+    out.push_str(&dim(&format!("  settings: {}\n", settings.display())));
+    out.push_str(&dim(&format!("  binary:   {}\n", binary.display())));
+    out.push('\n');
+    match outcome {
+        install::InstallOutcome::Installed { backup_path } => {
+            out.push_str(&purple("  installed.\n"));
+            if let Some(path) = backup_path {
+                out.push_str(&dim(&format!("  backup:   {}\n", path.display())));
+            }
+            out.push_str(&dim(
+                "  open Claude Code once to capture the first snapshot.\n",
+            ));
+        }
+        install::InstallOutcome::AlreadyInstalled => {
+            out.push_str(&purple("  already installed.\n"));
+        }
+        install::InstallOutcome::ReplacedExisting { previous, backup_path } => {
+            out.push_str(&purple("  replaced an existing statusLine.\n"));
+            out.push_str(&dim(&format!("  previous: {previous}\n")));
+            out.push_str(&dim(&format!("  backup:   {}\n", backup_path.display())));
+        }
+        install::InstallOutcome::RefusedToReplace { existing } => {
+            out.push_str(&purple(
+                "  another statusLine is already configured — refusing to replace.\n",
+            ));
+            out.push_str(&dim(&format!("  existing: {existing}\n")));
+            out.push_str(&dim(
+                "  re-run with --force to replace it. A backup of settings.json is made first.\n",
+            ));
+        }
+        install::InstallOutcome::Uninstalled { .. } | install::InstallOutcome::NotInstalled => {
+            unreachable!("install() never returns uninstall outcomes");
+        }
+    }
+    Ok(out)
+}
+
+/// `skopos usage uninstall`: remove the hook, preserving a backup.
+fn run_uninstall(force: bool) -> anyhow::Result<String> {
+    let settings = install::default_settings_path();
+    let binary = install::skopos_binary_path();
+    let outcome = install::uninstall(&settings, &binary, force)?;
+    let mut out = String::new();
+    out.push_str(&purple_bold("Uninstall statusline hook"));
+    out.push_str("\n\n");
+    out.push_str(&dim(&format!("  settings: {}\n", settings.display())));
+    out.push('\n');
+    match outcome {
+        install::InstallOutcome::Uninstalled { backup_path } => {
+            out.push_str(&purple("  removed.\n"));
+            if let Some(path) = backup_path {
+                out.push_str(&dim(&format!("  backup:   {}\n", path.display())));
+            }
+        }
+        install::InstallOutcome::NotInstalled => {
+            out.push_str(&dim(
+                "  nothing to do — no Skopos statusLine was configured. Re-run with --force to remove any other hook.\n",
+            ));
+        }
+        _ => unreachable!("uninstall() never returns install outcomes"),
+    }
+    Ok(out)
 }
 
 const SKOPOS_ASCII: &str = include_str!("../assets/skopos-ascii.txt");
@@ -331,6 +477,7 @@ fn panel_info_lines() -> Vec<InfoLine> {
         InfoLine::Head("Commands".to_string()),
         command("help", "list commands"),
         command("work", "pick a project, launch CLI"),
+        command("usage", "5h / weekly limit bars"),
         command("claude -t/-w/-m", "usage by period"),
         command("claude models", "usage by model"),
         command("providers", "tracked providers"),
