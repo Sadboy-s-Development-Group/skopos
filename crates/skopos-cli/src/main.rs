@@ -11,6 +11,7 @@ use skopos_collectors::gemini::{
     discover_gemini_session_paths, parse_usage_events_from_session_path,
 };
 use skopos_core::UsageEvent;
+use skopos_pricing::{default_overrides_path, Catalog};
 use skopos_store::SkoposStore;
 use std::{
     collections::BTreeMap,
@@ -1114,6 +1115,9 @@ pub(crate) async fn usage_period_report_filtered(
     let totals = store
         .usage_totals_between_filtered(start, end, provider)
         .await?;
+    let by_model = store
+        .usage_totals_by_model_between_filtered(start, end, provider)
+        .await?;
 
     let heading = match provider {
         Some("anthropic") => format!("Claude usage {label}"),
@@ -1146,7 +1150,53 @@ pub(crate) async fn usage_period_report_filtered(
         ));
     }
 
+    let catalog = Catalog::load_with_overrides(&default_overrides_path())?;
+    let (cost_usd, unpriced) = estimate_period_cost(&catalog, &by_model);
+    let cost_value = if totals.events == 0 {
+        "—".to_string()
+    } else {
+        format!("${:.2}", cost_usd)
+    };
+    report.push_str(&format!(
+        "  {}{:>10}\n",
+        purple(&format!("{:<8}", "est cost")),
+        cost_value,
+    ));
+    if !unpriced.is_empty() {
+        let mut models = unpriced
+            .iter()
+            .map(|(p, m)| format!("{p}/{m}"))
+            .collect::<Vec<_>>();
+        models.sort();
+        models.dedup();
+        report.push_str(&dim(&format!(
+            "    no price for: {}\n",
+            models.join(", "),
+        )));
+    }
+
     Ok(report)
+}
+
+/// Sum the catalog's USD estimate across each per-model row. Returns the
+/// total dollars and the list of `(provider, model)` pairs that the
+/// catalog does not know about (so the report can flag them).
+fn estimate_period_cost(
+    catalog: &Catalog,
+    by_model: &[skopos_store::UsageModelTotal],
+) -> (f64, Vec<(String, String)>) {
+    let mut total = 0.0;
+    let mut unpriced = Vec::new();
+    for row in by_model {
+        let input = row.input_tokens.max(0) as u64;
+        let cached = row.cached_input_tokens.max(0) as u64;
+        let output = row.output_tokens.max(0) as u64;
+        match catalog.estimate(&row.provider, &row.model, input, Some(cached), output) {
+            Some(money) => total += money.amount,
+            None => unpriced.push((row.provider.clone(), row.model.clone())),
+        }
+    }
+    (total, unpriced)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1645,6 +1695,37 @@ mod tests {
         assert_eq!(thousands(1_722), "1,722");
         assert_eq!(thousands(100), "100");
         assert_eq!(thousands(1_822_000), "1,822,000");
+    }
+
+    #[test]
+    fn estimate_period_cost_sums_per_model_and_flags_unpriced() {
+        use skopos_store::UsageModelTotal;
+
+        let catalog = Catalog::defaults();
+        let rows = vec![
+            UsageModelTotal {
+                provider: "openai".to_string(),
+                model: "gpt-5.5".to_string(),
+                events: 1,
+                input_tokens: 1_000_000,
+                cached_input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 1_000_000,
+            },
+            UsageModelTotal {
+                provider: "mystery".to_string(),
+                model: "ghost".to_string(),
+                events: 1,
+                input_tokens: 100,
+                cached_input_tokens: 0,
+                output_tokens: 100,
+                total_tokens: 200,
+            },
+        ];
+
+        let (total, unpriced) = estimate_period_cost(&catalog, &rows);
+        assert!((total - 5.0).abs() < 1e-9);
+        assert_eq!(unpriced, vec![("mystery".to_string(), "ghost".to_string())]);
     }
 
     #[test]

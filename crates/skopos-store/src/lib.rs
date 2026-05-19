@@ -230,6 +230,69 @@ impl SkoposStore {
         self.usage_totals_between_filtered(start, end, None).await
     }
 
+    pub async fn usage_totals_by_model_between_filtered(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        provider: Option<&str>,
+    ) -> anyhow::Result<Vec<UsageModelTotal>> {
+        let sql = match provider {
+            Some(_) => {
+                r#"
+                SELECT
+                    provider,
+                    model,
+                    COUNT(*) AS events,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM usage_events
+                WHERE timestamp >= ? AND timestamp < ? AND provider = ?
+                GROUP BY provider, model
+                ORDER BY total_tokens DESC, provider, model
+                "#
+            }
+            None => {
+                r#"
+                SELECT
+                    provider,
+                    model,
+                    COUNT(*) AS events,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM usage_events
+                WHERE timestamp >= ? AND timestamp < ?
+                GROUP BY provider, model
+                ORDER BY total_tokens DESC, provider, model
+                "#
+            }
+        };
+
+        let mut query = sqlx::query(sql)
+            .bind(start.to_rfc3339())
+            .bind(end.to_rfc3339());
+        if let Some(provider) = provider {
+            query = query.bind(provider);
+        }
+        let rows = query.fetch_all(&self.pool).await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| UsageModelTotal {
+                provider: row.get("provider"),
+                model: row.get("model"),
+                events: row.get("events"),
+                input_tokens: row.get("input_tokens"),
+                cached_input_tokens: row.get("cached_input_tokens"),
+                output_tokens: row.get("output_tokens"),
+                total_tokens: row.get("total_tokens"),
+            })
+            .collect())
+    }
+
     pub async fn usage_totals_between_filtered(
         &self,
         start: DateTime<Utc>,
@@ -441,5 +504,45 @@ mod tests {
         assert_eq!(totals.cached_input_tokens, 30);
         assert_eq!(totals.output_tokens, 20);
         assert_eq!(totals.total_tokens, 60);
+    }
+
+    #[tokio::test]
+    async fn usage_totals_by_model_between_groups_per_model_in_range() {
+        let store = SkoposStore::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+        let start = Utc.with_ymd_and_hms(2026, 5, 13, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 5, 14, 0, 0, 0).unwrap();
+
+        let mut inside_a = usage_event_at("inside-a", start);
+        inside_a.model = ModelId::new("claude-opus-4-7");
+        let mut inside_b = usage_event_at("inside-b", start);
+        inside_b.model = ModelId::new("claude-haiku-4-5-20251001");
+        let mut outside = usage_event_at("outside", end);
+        outside.model = ModelId::new("claude-opus-4-7");
+
+        store
+            .insert_usage_event_once(&inside_a, "inside-a")
+            .await
+            .unwrap();
+        store
+            .insert_usage_event_once(&inside_b, "inside-b")
+            .await
+            .unwrap();
+        store
+            .insert_usage_event_once(&outside, "outside")
+            .await
+            .unwrap();
+
+        let totals = store
+            .usage_totals_by_model_between_filtered(start, end, None)
+            .await
+            .unwrap();
+        assert_eq!(totals.len(), 2);
+        assert!(totals
+            .iter()
+            .any(|t| t.model == "claude-opus-4-7" && t.events == 1));
+        assert!(totals
+            .iter()
+            .any(|t| t.model == "claude-haiku-4-5-20251001" && t.events == 1));
     }
 }
