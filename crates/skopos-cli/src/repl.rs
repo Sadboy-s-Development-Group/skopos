@@ -18,8 +18,8 @@ use crossterm::{
 };
 
 use crate::{
-    config, dim, providers_report, purple, purple_bold, usage_by_model_report,
-    usage_limits_report, usage_period_report, work, UsagePeriod,
+    config, dim, providers_report, purple, purple_bold, usage_by_model_report_filtered,
+    usage_limits_report, usage_period_report_filtered, work, UsagePeriod,
 };
 
 /// Run the interactive Skopos shell against `db_path`.
@@ -72,11 +72,13 @@ pub(crate) async fn run(db_path: &Path) -> anyhow::Result<()> {
                         continue;
                     }
                     Command::Providers => report_or_error(providers_report(db_path).await),
-                    Command::Models => report_or_error(usage_by_model_report(db_path).await),
-                    Command::Period(period) => {
-                        report_or_error(usage_period_report(db_path, period).await)
-                    }
-                    Command::Usage => report_or_error(usage_limits_report()),
+                    Command::Models(provider) => report_or_error(
+                        usage_by_model_report_filtered(db_path, provider.as_deref()).await,
+                    ),
+                    Command::Period(period, provider) => report_or_error(
+                        usage_period_report_filtered(db_path, period, provider.as_deref()).await,
+                    ),
+                    Command::Usage => report_or_error(usage_limits_report().await),
                     Command::UsageInstallHint => {
                         println!(
                             "{}",
@@ -133,8 +135,8 @@ enum Command {
     Help,
     Clear,
     Providers,
-    Models,
-    Period(UsagePeriod),
+    Models(Option<String>),
+    Period(UsagePeriod, Option<String>),
     Work,
     Usage,
     UsageInstallHint,
@@ -151,18 +153,21 @@ fn parse_command(input: &str) -> Command {
         ["work"] | ["w"] => Command::Work,
         ["usage"] | ["u"] => Command::Usage,
         ["usage", "install"] | ["usage", "uninstall"] => Command::UsageInstallHint,
-        ["claude", rest @ ..] => parse_claude(rest),
+        ["claude", rest @ ..] => parse_period_args("claude", rest, Some("anthropic")),
+        ["codex", rest @ ..] => parse_period_args("codex", rest, Some("openai")),
+        ["gemini", rest @ ..] => parse_period_args("gemini", rest, Some("google")),
         _ => Command::Unknown(input.to_string()),
     }
 }
 
-fn parse_claude(args: &[&str]) -> Command {
+fn parse_period_args(prefix: &str, args: &[&str], provider: Option<&str>) -> Command {
+    let provider = provider.map(ToString::to_string);
     match args {
-        ["-t"] | ["--today"] | ["today"] => Command::Period(UsagePeriod::Today),
-        ["-w"] | ["--week"] | ["week"] => Command::Period(UsagePeriod::Week),
-        ["-m"] | ["--month"] | ["month"] => Command::Period(UsagePeriod::Month),
-        ["models"] | ["-M"] | ["--models"] => Command::Models,
-        _ => Command::Unknown(format!("claude {}", args.join(" "))),
+        ["-t"] | ["--today"] | ["today"] => Command::Period(UsagePeriod::Today, provider),
+        ["-w"] | ["--week"] | ["week"] => Command::Period(UsagePeriod::Week, provider),
+        ["-m"] | ["--month"] | ["month"] => Command::Period(UsagePeriod::Month, provider),
+        ["models"] | ["-M"] | ["--models"] => Command::Models(provider),
+        _ => Command::Unknown(format!("{prefix} {}", args.join(" "))),
     }
 }
 
@@ -174,14 +179,30 @@ fn help_text() -> String {
         ("work", "pick a project and launch the agentic CLI"),
         ("usage", "5h / weekly rate-limit bars per provider"),
         ("usage install", "register statusline hook (run from shell)"),
-        ("claude -t", "usage today (token totals)"),
-        ("claude -w", "usage this week (token totals)"),
-        ("claude -m", "usage this month (token totals)"),
-        ("claude models", "usage grouped by model"),
+        ("claude -t", "Claude usage today (token totals)"),
+        ("claude -w", "Claude usage this week (token totals)"),
+        ("claude -m", "Claude usage this month (token totals)"),
+        ("claude models", "Claude usage grouped by model"),
+        ("codex -t", "Codex usage today (token totals)"),
+        ("codex -w", "Codex usage this week (token totals)"),
+        ("codex -m", "Codex usage this month (token totals)"),
+        ("codex models", "Codex usage grouped by model"),
+        ("gemini -t", "Gemini usage today (token totals)"),
+        ("gemini -w", "Gemini usage this week (token totals)"),
+        ("gemini -m", "Gemini usage this month (token totals)"),
+        ("gemini models", "Gemini usage grouped by model"),
         ("providers", "list tracked providers"),
         (
             "claude import",
             "import Claude Code logs (run: skopos claude import)",
+        ),
+        (
+            "codex import",
+            "import Codex rollout JSONLs (run: skopos codex import)",
+        ),
+        (
+            "gemini import",
+            "import Gemini session JSONLs (run: skopos gemini import)",
         ),
         ("clear", "clear the screen and redraw the splash"),
         ("help", "show this help"),
@@ -434,17 +455,60 @@ mod tests {
     fn parses_claude_period_aliases() {
         assert!(matches!(
             parse_command("claude -t"),
-            Command::Period(UsagePeriod::Today)
+            Command::Period(UsagePeriod::Today, Some(ref p)) if p == "anthropic"
         ));
         assert!(matches!(
             parse_command("claude -w"),
-            Command::Period(UsagePeriod::Week)
+            Command::Period(UsagePeriod::Week, Some(ref p)) if p == "anthropic"
         ));
         assert!(matches!(
             parse_command("  claude   -m  "),
-            Command::Period(UsagePeriod::Month)
+            Command::Period(UsagePeriod::Month, Some(ref p)) if p == "anthropic"
         ));
-        assert!(matches!(parse_command("claude models"), Command::Models));
+        assert!(matches!(
+            parse_command("claude models"),
+            Command::Models(Some(ref p)) if p == "anthropic"
+        ));
+    }
+
+    #[test]
+    fn parses_gemini_period_aliases() {
+        assert!(matches!(
+            parse_command("gemini -t"),
+            Command::Period(UsagePeriod::Today, Some(ref p)) if p == "google"
+        ));
+        assert!(matches!(
+            parse_command("gemini -w"),
+            Command::Period(UsagePeriod::Week, Some(ref p)) if p == "google"
+        ));
+        assert!(matches!(
+            parse_command("gemini -m"),
+            Command::Period(UsagePeriod::Month, Some(ref p)) if p == "google"
+        ));
+        assert!(matches!(
+            parse_command("gemini models"),
+            Command::Models(Some(ref p)) if p == "google"
+        ));
+    }
+
+    #[test]
+    fn parses_codex_period_aliases() {
+        assert!(matches!(
+            parse_command("codex -t"),
+            Command::Period(UsagePeriod::Today, Some(ref p)) if p == "openai"
+        ));
+        assert!(matches!(
+            parse_command("codex -w"),
+            Command::Period(UsagePeriod::Week, Some(ref p)) if p == "openai"
+        ));
+        assert!(matches!(
+            parse_command("codex -m"),
+            Command::Period(UsagePeriod::Month, Some(ref p)) if p == "openai"
+        ));
+        assert!(matches!(
+            parse_command("codex models"),
+            Command::Models(Some(ref p)) if p == "openai"
+        ));
     }
 
     #[test]

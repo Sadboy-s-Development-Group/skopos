@@ -24,13 +24,22 @@ use crate::limits::{claude_settings_path, home_dir};
 /// summary to the user.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum InstallOutcome {
-    Installed { backup_path: Option<PathBuf> },
+    Installed {
+        backup_path: Option<PathBuf>,
+    },
     AlreadyInstalled,
-    ReplacedExisting { previous: String, backup_path: PathBuf },
+    ReplacedExisting {
+        previous: String,
+        backup_path: PathBuf,
+    },
     /// A different `statusLine` is already configured and the caller did
     /// not pass `--force`. No changes were written.
-    RefusedToReplace { existing: String },
-    Uninstalled { backup_path: Option<PathBuf> },
+    RefusedToReplace {
+        existing: String,
+    },
+    Uninstalled {
+        backup_path: Option<PathBuf>,
+    },
     NotInstalled,
 }
 
@@ -78,7 +87,9 @@ pub(crate) fn install(
                 backup_path: backup.expect("backup made when file existed"),
             })
         }
-        _ => Ok(InstallOutcome::Installed { backup_path: backup }),
+        _ => Ok(InstallOutcome::Installed {
+            backup_path: backup,
+        }),
     }
 }
 
@@ -107,7 +118,9 @@ pub(crate) fn uninstall(
         map.remove("statusLine");
     }
     write_settings(settings_path, &root)?;
-    Ok(InstallOutcome::Uninstalled { backup_path: backup })
+    Ok(InstallOutcome::Uninstalled {
+        backup_path: backup,
+    })
 }
 
 /// Read `~/.claude/settings.json` as a JSON object, or fall back to `{}`
@@ -190,7 +203,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("skopos-install-test-{name}-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("skopos-install-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         path
@@ -206,7 +220,10 @@ mod tests {
         let written: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let expected = format!("{} statusline", binary.display());
         assert_eq!(written["statusLine"]["command"], Value::String(expected));
-        assert_eq!(written["statusLine"]["type"], Value::String("command".into()));
+        assert_eq!(
+            written["statusLine"]["type"],
+            Value::String("command".into())
+        );
     }
 
     #[test]
@@ -262,7 +279,10 @@ mod tests {
         let binary = dir.join("bin/skopos");
         let outcome = install(&settings, &binary, true).unwrap();
         match outcome {
-            InstallOutcome::ReplacedExisting { previous, backup_path } => {
+            InstallOutcome::ReplacedExisting {
+                previous,
+                backup_path,
+            } => {
                 assert!(previous.contains("my-prompt"));
                 assert!(backup_path.exists());
                 let backed_up = fs::read_to_string(&backup_path).unwrap();
@@ -305,6 +325,9 @@ mod tests {
         );
         let still_there: Value =
             serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-        assert_eq!(still_there["statusLine"]["command"], Value::String("someone-else".into()));
+        assert_eq!(
+            still_there["statusLine"]["command"],
+            Value::String("someone-else".into())
+        );
     }
 }

@@ -353,10 +353,18 @@ pub(crate) fn render_session_block(
         out.push_str(&format!("    {}{}\n", purple("cwd      "), cwd));
     }
     if let Some(ctx) = &snap.context_window {
-        out.push_str(&format!("    {}{}\n", purple("ctx      "), render_ctx_line(ctx)));
+        out.push_str(&format!(
+            "    {}{}\n",
+            purple("ctx      "),
+            render_ctx_line(ctx)
+        ));
     }
     if let Some(cost) = &snap.cost {
-        out.push_str(&format!("    {}{}\n", purple("cost     "), render_cost_line(cost)));
+        out.push_str(&format!(
+            "    {}{}\n",
+            purple("cost     "),
+            render_cost_line(cost)
+        ));
     }
     out
 }
@@ -435,7 +443,7 @@ fn render_limits_row(label: &str, window: Option<&RateWindow>, now: DateTime<Utc
     )
 }
 
-fn humanise_relative_future(when: DateTime<Utc>, now: DateTime<Utc>) -> String {
+pub(crate) fn humanise_relative_future(when: DateTime<Utc>, now: DateTime<Utc>) -> String {
     let delta = when - now;
     if delta <= Duration::zero() {
         return "now".to_string();
@@ -499,7 +507,7 @@ fn short_tokens(n: u64) -> String {
 /// fractional characters (▏▎▍…) read as gaps next to a solid `█`. We
 /// round to the nearest full cell, accepting ~4% quantisation on a
 /// `BAR_WIDTH=24` bar in exchange for a continuous filled segment.
-fn progress_bar(pct: f64, width: usize) -> String {
+pub(crate) fn progress_bar(pct: f64, width: usize) -> String {
     let ratio = (pct / 100.0).clamp(0.0, 1.0);
     let full = (ratio * width as f64).round() as usize;
     let full = full.min(width);
@@ -648,16 +656,15 @@ mod tests {
 
     #[test]
     fn statusline_extracts_session_and_context() {
-        let snap = snapshot_from_statusline_json(
-            fake_payload(),
-            None,
-            None,
-            ts("2026-05-17T10:00:00Z"),
-        )
-        .unwrap();
+        let snap =
+            snapshot_from_statusline_json(fake_payload(), None, None, ts("2026-05-17T10:00:00Z"))
+                .unwrap();
         assert_eq!(snap.session_id.as_deref(), Some("s1"));
         assert_eq!(snap.cwd.as_deref(), Some("/home/me/project"));
-        assert_eq!(snap.model_display_name.as_deref(), Some("Opus 4.7 (1M context)"));
+        assert_eq!(
+            snap.model_display_name.as_deref(),
+            Some("Opus 4.7 (1M context)")
+        );
         let ctx = snap.context_window.unwrap();
         assert_eq!(ctx.used_percentage, Some(15.0));
         let usage = ctx.current_usage.unwrap();
@@ -670,13 +677,9 @@ mod tests {
 
     #[test]
     fn statusline_extracts_rate_limits_with_unix_epoch_reset() {
-        let snap = snapshot_from_statusline_json(
-            fake_payload(),
-            None,
-            None,
-            ts("2026-05-17T10:00:00Z"),
-        )
-        .unwrap();
+        let snap =
+            snapshot_from_statusline_json(fake_payload(), None, None, ts("2026-05-17T10:00:00Z"))
+                .unwrap();
         let rl = snap.rate_limits.expect("rate_limits present");
         let fh = rl.five_hour.unwrap();
         assert_eq!(fh.used_percentage, 2.0);
@@ -724,8 +727,14 @@ mod tests {
 
     #[test]
     fn plan_label_handles_pro_and_max_variants() {
-        assert_eq!(plan_label(Some("max"), Some("default_claude_max_5x")), "Claude Max 5x");
-        assert_eq!(plan_label(Some("max"), Some("default_claude_max_20x")), "Claude Max 20x");
+        assert_eq!(
+            plan_label(Some("max"), Some("default_claude_max_5x")),
+            "Claude Max 5x"
+        );
+        assert_eq!(
+            plan_label(Some("max"), Some("default_claude_max_20x")),
+            "Claude Max 20x"
+        );
         assert_eq!(plan_label(Some("pro"), None), "Claude Pro");
         assert_eq!(plan_label(None, None), "Claude");
     }

@@ -145,23 +145,52 @@ impl SkoposStore {
     }
 
     pub async fn usage_totals_by_model(&self) -> anyhow::Result<Vec<UsageModelTotal>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT
-                provider,
-                model,
-                COUNT(*) AS events,
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                COALESCE(SUM(total_tokens), 0) AS total_tokens
-            FROM usage_events
-            GROUP BY provider, model
-            ORDER BY total_tokens DESC, provider, model
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        self.usage_totals_by_model_filtered(None).await
+    }
+
+    pub async fn usage_totals_by_model_filtered(
+        &self,
+        provider: Option<&str>,
+    ) -> anyhow::Result<Vec<UsageModelTotal>> {
+        let sql = match provider {
+            Some(_) => {
+                r#"
+                SELECT
+                    provider,
+                    model,
+                    COUNT(*) AS events,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM usage_events
+                WHERE provider = ?
+                GROUP BY provider, model
+                ORDER BY total_tokens DESC, provider, model
+                "#
+            }
+            None => {
+                r#"
+                SELECT
+                    provider,
+                    model,
+                    COUNT(*) AS events,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM usage_events
+                GROUP BY provider, model
+                ORDER BY total_tokens DESC, provider, model
+                "#
+            }
+        };
+
+        let mut query = sqlx::query(sql);
+        if let Some(provider) = provider {
+            query = query.bind(provider);
+        }
+        let rows = query.fetch_all(&self.pool).await?;
 
         Ok(rows
             .into_iter()
@@ -177,27 +206,70 @@ impl SkoposStore {
             .collect())
     }
 
+    pub async fn latest_usage_event_timestamp_for_provider(
+        &self,
+        provider: &str,
+    ) -> anyhow::Result<Option<DateTime<Utc>>> {
+        let row =
+            sqlx::query("SELECT MAX(timestamp) AS max_ts FROM usage_events WHERE provider = ?")
+                .bind(provider)
+                .fetch_one(&self.pool)
+                .await?;
+        let raw: Option<String> = row.try_get("max_ts")?;
+        match raw {
+            Some(ts) => Ok(Some(DateTime::parse_from_rfc3339(&ts)?.with_timezone(&Utc))),
+            None => Ok(None),
+        }
+    }
+
     pub async fn usage_totals_between(
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> anyhow::Result<UsageTotals> {
-        let row = sqlx::query(
-            r#"
-            SELECT
-                COUNT(*) AS events,
-                COALESCE(SUM(input_tokens), 0) AS input_tokens,
-                COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-                COALESCE(SUM(output_tokens), 0) AS output_tokens,
-                COALESCE(SUM(total_tokens), 0) AS total_tokens
-            FROM usage_events
-            WHERE timestamp >= ? AND timestamp < ?
-            "#,
-        )
-        .bind(start.to_rfc3339())
-        .bind(end.to_rfc3339())
-        .fetch_one(&self.pool)
-        .await?;
+        self.usage_totals_between_filtered(start, end, None).await
+    }
+
+    pub async fn usage_totals_between_filtered(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        provider: Option<&str>,
+    ) -> anyhow::Result<UsageTotals> {
+        let sql = match provider {
+            Some(_) => {
+                r#"
+                SELECT
+                    COUNT(*) AS events,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM usage_events
+                WHERE timestamp >= ? AND timestamp < ? AND provider = ?
+                "#
+            }
+            None => {
+                r#"
+                SELECT
+                    COUNT(*) AS events,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens
+                FROM usage_events
+                WHERE timestamp >= ? AND timestamp < ?
+                "#
+            }
+        };
+
+        let mut query = sqlx::query(sql)
+            .bind(start.to_rfc3339())
+            .bind(end.to_rfc3339());
+        if let Some(provider) = provider {
+            query = query.bind(provider);
+        }
+        let row = query.fetch_one(&self.pool).await?;
 
         Ok(UsageTotals {
             events: row.get("events"),
@@ -292,6 +364,48 @@ mod tests {
         assert_eq!(totals[0].cached_input_tokens, 60);
         assert_eq!(totals[0].output_tokens, 40);
         assert_eq!(totals[0].total_tokens, 120);
+    }
+
+    #[tokio::test]
+    async fn latest_usage_event_timestamp_for_provider_returns_max_per_provider() {
+        let store = SkoposStore::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+
+        let earlier = Utc.with_ymd_and_hms(2026, 5, 10, 12, 0, 0).unwrap();
+        let later = Utc.with_ymd_and_hms(2026, 5, 12, 9, 30, 0).unwrap();
+        let other_provider_later = Utc.with_ymd_and_hms(2026, 5, 15, 0, 0, 0).unwrap();
+
+        let mut event_a = usage_event_at("a", earlier);
+        event_a.provider = ProviderId::new("openai");
+        let mut event_b = usage_event_at("b", later);
+        event_b.provider = ProviderId::new("openai");
+        let mut event_c = usage_event_at("c", other_provider_later);
+        event_c.provider = ProviderId::new("anthropic");
+
+        store
+            .insert_usage_event_once(&event_a, "openai:a")
+            .await
+            .unwrap();
+        store
+            .insert_usage_event_once(&event_b, "openai:b")
+            .await
+            .unwrap();
+        store
+            .insert_usage_event_once(&event_c, "anthropic:c")
+            .await
+            .unwrap();
+
+        let max = store
+            .latest_usage_event_timestamp_for_provider("openai")
+            .await
+            .unwrap();
+        assert_eq!(max, Some(later));
+
+        let absent = store
+            .latest_usage_event_timestamp_for_provider("nope")
+            .await
+            .unwrap();
+        assert_eq!(absent, None);
     }
 
     #[tokio::test]

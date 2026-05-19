@@ -73,14 +73,12 @@ impl FromStr for ProviderId {
     }
 }
 
-/// Every provider the picker can cycle through, in display order.
-pub(crate) fn all() -> &'static [ProviderId] {
-    &[
-        ProviderId::Claude,
-        ProviderId::Codex,
-        ProviderId::Gemini,
-        ProviderId::Opencode,
-    ]
+/// Providers the `skopos work` ←/→ cycle steps through. Claude, Codex
+/// and Gemini all have log collectors wired end-to-end today; Opencode
+/// stays defined in the registry but is not pickable until its
+/// integration lands.
+pub(crate) fn picker_cycle() -> &'static [ProviderId] {
+    &[ProviderId::Claude, ProviderId::Codex, ProviderId::Gemini]
 }
 
 #[cfg(test)]

@@ -40,10 +40,7 @@ pub(crate) struct LocalUsage {
 
 /// Aggregate tokens across the 5h and 7d windows ending at `now`. Files
 /// last-modified before the 7d window are skipped entirely.
-pub(crate) fn aggregate(
-    claude_home: &Path,
-    now: DateTime<Utc>,
-) -> anyhow::Result<LocalUsage> {
+pub(crate) fn aggregate(claude_home: &Path, now: DateTime<Utc>) -> anyhow::Result<LocalUsage> {
     let paths = discover_claude_code_jsonl_paths(claude_home)?;
     let seven_days_ago = now - Duration::days(7);
     let five_hours_ago = now - Duration::hours(5);
@@ -103,9 +100,7 @@ pub(crate) fn render_local_block(usage: &LocalUsage) -> String {
     )));
 
     if usage.last_7d.events == 0 {
-        out.push_str(&dim(
-            "    no Claude Code events in the last 7 days.\n",
-        ));
+        out.push_str(&dim("    no Claude Code events in the last 7 days.\n"));
         return out;
     }
 
@@ -181,10 +176,8 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "skopos-local-usage-{name}-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("skopos-local-usage-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path

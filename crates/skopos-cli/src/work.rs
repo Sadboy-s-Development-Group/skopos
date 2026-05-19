@@ -25,7 +25,7 @@ use crate::icons::{self, ProjectIcon};
 use crate::providers::{self, ProviderId};
 
 /// Hint footer shown under the picker.
-const HINT: &str = "  ↑/↓ navigate  ·  enter open  ·  tab provider  ·  esc cancel";
+const HINT: &str = "  ↑/↓ project  ·  ←/→ provider  ·  enter open  ·  esc cancel";
 
 /// Run the project picker. Returns when the user cancels; on selection
 /// `exec`s the provider's CLI and never returns. `provider_override` and
@@ -163,8 +163,12 @@ impl Picker {
                         (KeyCode::End, _) | (KeyCode::PageDown, _) => {
                             self.cursor = self.projects.len().saturating_sub(1);
                         }
-                        (KeyCode::Tab, _) => self.cycle_provider(1),
-                        (KeyCode::BackTab, _) => self.cycle_provider(-1),
+                        (KeyCode::Right, _) | (KeyCode::Char('l'), _) | (KeyCode::Tab, _) => {
+                            self.cycle_provider(1);
+                        }
+                        (KeyCode::Left, _) | (KeyCode::Char('h'), _) | (KeyCode::BackTab, _) => {
+                            self.cycle_provider(-1);
+                        }
                         (KeyCode::Enter, _) => {
                             return Ok(PickOutcome::Selected {
                                 project: self.projects[self.cursor].path.clone(),
@@ -193,14 +197,11 @@ impl Picker {
     }
 
     fn cycle_provider(&mut self, delta: isize) {
-        let providers = providers::all();
-        let current = providers
-            .iter()
-            .position(|p| *p == self.provider)
-            .unwrap_or(0) as isize;
-        let len = providers.len() as isize;
+        let cycle = providers::picker_cycle();
+        let current = cycle.iter().position(|p| *p == self.provider).unwrap_or(0) as isize;
+        let len = cycle.len() as isize;
         let next = (current + delta).rem_euclid(len);
-        self.provider = providers[next as usize];
+        self.provider = cycle[next as usize];
     }
 
     fn draw(&mut self) -> io::Result<()> {

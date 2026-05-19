@@ -2,6 +2,8 @@ use anyhow::Result;
 use skopos_core::{RawEvent, UsageEvent};
 
 pub mod claude_code;
+pub mod codex;
+pub mod gemini;
 
 #[async_trait::async_trait]
 pub trait Collector: Send + Sync {
