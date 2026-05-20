@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 924 178" width="924" height="178" role="img" aria-label="SKOPOS">
+  <title>SKOPOS</title>
+  <desc>The unified workspace for developers.</desc>
+  <defs>
+    <linearGradient id="skopos" x1="0" y1="12" x2="0" y2="172" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E9D5FF"/>
+      <stop offset="1" stop-color="#9D7CD8"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#skopos)" stroke="url(#skopos)" stroke-width="5" stroke-linejoin="round" paint-order="stroke"
+     font-family="ui-monospace,'DejaVu Sans Mono','Cascadia Mono',Consolas,'Courier New',monospace" font-size="30" xml:space="preserve">
+    <text x="12" y="34">███████╗██╗  ██╗ ██████╗ ██████╗  ██████╗ ███████╗</text>
+    <text x="12" y="60">██╔════╝██║ ██╔╝██╔═══██╗██╔══██╗██╔═══██╗██╔════╝</text>
+    <text x="12" y="86">███████╗█████╔╝ ██║   ██║██████╔╝██║   ██║███████╗</text>
+    <text x="12" y="112">╚════██║██╔═██╗ ██║   ██║██╔═══╝ ██║   ██║╚════██║</text>
+    <text x="12" y="138">███████║██║  ██╗╚██████╔╝██║     ╚██████╔╝███████║</text>
+    <text x="12" y="164">╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝      ╚═════╝ ╚══════╝</text>
+  </g>
+</svg>

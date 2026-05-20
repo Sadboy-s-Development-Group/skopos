@@ -1,22 +1,18 @@
 <div align="center">
 
-<pre>
-███████╗██╗  ██╗ ██████╗ ██████╗  ██████╗ ███████╗
-██╔════╝██║ ██╔╝██╔═══██╗██╔══██╗██╔═══██╗██╔════╝
-███████╗█████╔╝ ██║   ██║██████╔╝██║   ██║███████╗
-╚════██║██╔═██╗ ██║   ██║██╔═══╝ ██║   ██║╚════██║
-███████║██║  ██╗╚██████╔╝██║     ╚██████╔╝███████║
-╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝      ╚═════╝ ╚══════╝
-</pre>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/banner-dark.svg">
+  <img alt="SKOPOS" src="docs/banner-light.svg" width="620">
+</picture>
 
 ### The unified workspace for developers
 
 *One terminal home for your projects, your AI spend, and your machine.*
 
-![Rust](https://img.shields.io/badge/rust-1.95-CE422B?logo=rust&logoColor=white)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey)
-![Local-first](https://img.shields.io/badge/local--first-%E2%9C%93-BD93F9)
+![Rust](https://img.shields.io/badge/Rust-1.95-BD93F9?style=flat-square&logo=rust&logoColor=white&labelColor=2E1065)
+![License](https://img.shields.io/badge/License-MIT-BD93F9?style=flat-square&labelColor=2E1065)
+![Platform](https://img.shields.io/badge/Platform-linux%20%7C%20macOS-A78BFA?style=flat-square&labelColor=2E1065)
+![Local-first](https://img.shields.io/badge/Local--first-%E2%9C%93-9D7CD8?style=flat-square&labelColor=2E1065)
 
 </div>
 
