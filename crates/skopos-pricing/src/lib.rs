@@ -86,8 +86,7 @@ impl Catalog {
     }
 
     pub fn price(&self, provider: &str, model: &str) -> Option<&ModelPrice> {
-        self.by_key
-            .get(&(provider.to_string(), model.to_string()))
+        self.by_key.get(&(provider.to_string(), model.to_string()))
     }
 
     pub fn estimate(
@@ -195,10 +194,8 @@ mod tests {
 
     #[test]
     fn override_file_replaces_default_entry() {
-        let dir = std::env::temp_dir().join(format!(
-            "skopos-pricing-override-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("skopos-pricing-override-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("pricing.toml");

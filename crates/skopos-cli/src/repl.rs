@@ -18,7 +18,7 @@ use crossterm::{
 };
 
 use crate::{
-    config, dim, providers_report, purple, purple_bold, usage_by_model_report_filtered,
+    config, dim, network, providers_report, purple, purple_bold, usage_by_model_report_filtered,
     usage_limits_report, usage_period_report_filtered, work, UsagePeriod,
 };
 
@@ -97,6 +97,18 @@ pub(crate) async fn run(db_path: &Path) -> anyhow::Result<()> {
                             println!("{}", dim(&format!("  config error: {error}")));
                         }
                     },
+                    Command::Network => match config::load() {
+                        Ok(cfg) => {
+                            if let Err(error) =
+                                network::run_dashboard(&cfg, db_path.to_path_buf()).await
+                            {
+                                println!("{}", dim(&format!("  error: {error}")));
+                            }
+                        }
+                        Err(error) => {
+                            println!("{}", dim(&format!("  config error: {error}")));
+                        }
+                    },
                     Command::Unknown(raw) => {
                         println!(
                             "{}",
@@ -140,6 +152,7 @@ enum Command {
     Work,
     Usage,
     UsageInstallHint,
+    Network,
     Unknown(String),
 }
 
@@ -151,6 +164,7 @@ fn parse_command(input: &str) -> Command {
         ["clear"] | ["cls"] => Command::Clear,
         ["providers"] | ["p"] => Command::Providers,
         ["work"] | ["w"] => Command::Work,
+        ["network"] | ["net"] => Command::Network,
         ["usage"] | ["u"] => Command::Usage,
         ["usage", "install"] | ["usage", "uninstall"] => Command::UsageInstallHint,
         ["claude", rest @ ..] => parse_period_args("claude", rest, Some("anthropic")),
@@ -177,6 +191,7 @@ fn help_text() -> String {
     out.push('\n');
     for (cmd, desc) in [
         ("work", "pick a project and launch the agentic CLI"),
+        ("network", "internet connectivity dashboard"),
         ("usage", "5h / weekly rate-limit bars per provider"),
         ("usage install", "register statusline hook (run from shell)"),
         ("claude -t", "Claude usage today (token totals)"),

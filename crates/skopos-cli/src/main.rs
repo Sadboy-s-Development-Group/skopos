@@ -24,6 +24,7 @@ mod icons;
 mod install;
 mod limits;
 mod local_usage;
+mod network;
 mod providers;
 mod repl;
 mod work;
@@ -78,11 +79,48 @@ enum Command {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+    /// Track internet connectivity. With no subcommand, opens the live
+    /// network-health dashboard.
+    Network {
+        #[command(subcommand)]
+        command: Option<NetworkCommand>,
+    },
     /// Read the statusline JSON Claude Code pipes on stdin, persist the
     /// rate-limit snapshot, and print a compact one-line view. Registered
     /// by `skopos usage install`; not meant to be invoked by hand.
     #[command(hide = true)]
     Statusline,
+}
+
+#[derive(Debug, Subcommand)]
+enum NetworkCommand {
+    /// Run the connectivity probe loop in the foreground. This is what the
+    /// systemd unit runs; not normally invoked by hand.
+    Watch {
+        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Print a one-shot network-health verdict and exit (0 stable, 1
+    /// moderate, 2 severe). Handy for MOTD banners and scripts.
+    Status {
+        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// Generate the systemd unit for the probe daemon.
+    Install {
+        /// Write a no-root per-user unit under ~/.config/systemd/user
+        /// instead of staging a system unit.
+        #[arg(long)]
+        user: bool,
+    },
+    /// Remove the systemd unit for the probe daemon.
+    Uninstall {
+        /// Target the per-user unit rather than the system unit.
+        #[arg(long)]
+        user: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -458,6 +496,26 @@ async fn main() -> anyhow::Result<()> {
             let cfg = config::load()?;
             work::run(&cfg, provider, root)?;
         }
+        Some(Command::Network { command }) => {
+            let cfg = config::load()?;
+            match command {
+                None => network::run_dashboard(&cfg, default_db_path()).await?,
+                Some(NetworkCommand::Watch { db }) => {
+                    network::run_watch(&cfg, db.unwrap_or_else(default_db_path)).await?;
+                }
+                Some(NetworkCommand::Status { db }) => {
+                    let code =
+                        network::run_status(&cfg, db.unwrap_or_else(default_db_path)).await?;
+                    std::process::exit(code);
+                }
+                Some(NetworkCommand::Install { user }) => {
+                    print!("{}", network::run_install(user)?);
+                }
+                Some(NetworkCommand::Uninstall { user }) => {
+                    print!("{}", network::run_uninstall(user)?);
+                }
+            }
+        }
         Some(Command::Statusline) => run_statusline()?,
     }
 
@@ -785,6 +843,7 @@ fn panel_info_lines() -> Vec<InfoLine> {
         command("help", "list commands"),
         command("work", "pick a project, launch CLI"),
         command("usage", "5h / weekly limit bars"),
+        command("network", "connectivity dashboard"),
         command("claude -t/-w/-m", "usage by period"),
         command("claude models", "usage by model"),
         command("codex usage", "Codex 5h / weekly limits"),
@@ -1169,10 +1228,7 @@ pub(crate) async fn usage_period_report_filtered(
             .collect::<Vec<_>>();
         models.sort();
         models.dedup();
-        report.push_str(&dim(&format!(
-            "    no price for: {}\n",
-            models.join(", "),
-        )));
+        report.push_str(&dim(&format!("    no price for: {}\n", models.join(", "),)));
     }
 
     Ok(report)

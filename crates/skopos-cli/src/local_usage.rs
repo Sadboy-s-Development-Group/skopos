@@ -183,7 +183,7 @@ mod tests {
         path
     }
 
-    fn write_jsonl(dir: &PathBuf, name: &str, events: &[(&str, &str, u64, u64, u64)]) -> PathBuf {
+    fn write_jsonl(dir: &Path, name: &str, events: &[(&str, &str, u64, u64, u64)]) -> PathBuf {
         let project_dir = dir.join("projects").join("test-project");
         fs::create_dir_all(&project_dir).unwrap();
         let path = project_dir.join(name);
