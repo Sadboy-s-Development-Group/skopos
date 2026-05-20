@@ -1,9 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 924 178" width="924" height="178" role="img" aria-label="SKOPOS">
   <title>SKOPOS</title>
   <desc>The unified workspace for developers.</desc>
+  <defs>
+    <linearGradient id="face" x1="0" y1="12" x2="0" y2="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D8B4FE"/>
+      <stop offset="0.45" stop-color="#BD93F9"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
   <style>
     text { font-family: ui-monospace,'DejaVu Sans Mono','Cascadia Mono',Consolas,'Courier New',monospace; font-size: 30px; }
-    .f { fill: #BD93F9; stroke: #BD93F9; stroke-width: 4; }
+    .f { fill: url(#face); stroke: url(#face); stroke-width: 4; }
     .s { fill: #3B0764; stroke: #3B0764; stroke-width: 1.5; }
   </style>
   <g stroke-linejoin="round" paint-order="stroke" xml:space="preserve">
