@@ -20,7 +20,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::time::timeout;
 
 use crate::limits::{home_dir, humanise_relative_future, progress_bar};
-use crate::{dim, purple, purple_bold};
+use crate::theme::{codex_green, dim, purple, purple_bold};
 
 const BAR_WIDTH: usize = 24;
 const FETCH_TIMEOUT: StdDuration = StdDuration::from_secs(5);
@@ -372,10 +372,6 @@ fn render_row(label: &str, window: Option<&CodexWindow>, now: DateTime<Utc>) -> 
         purple(&format!("{label:<8}")),
         dim(&resets),
     )
-}
-
-fn codex_green(text: &str) -> String {
-    format!("\x1b[38;2;180;220;130m{text}\x1b[0m")
 }
 
 #[cfg(test)]

@@ -27,7 +27,10 @@ mod local_usage;
 mod network;
 mod providers;
 mod repl;
+mod theme;
 mod work;
+
+use theme::{dim, purple, purple_bold};
 
 #[derive(Debug, Parser)]
 #[command(name = "skopos")]
@@ -695,9 +698,6 @@ fn run_uninstall(force: bool) -> anyhow::Result<String> {
 
 const SKOPOS_ASCII: &str = include_str!("../assets/skopos-ascii.txt");
 
-/// Bright purple used for side-panel text, table headers and labels.
-const PURPLE: (u8, u8, u8) = (189, 147, 249);
-
 /// Horizontal gap between the ASCII art and the side panel.
 const SPLASH_GAP: usize = 4;
 
@@ -843,29 +843,7 @@ fn purple_gradient_line(line: &str, index: usize, total_lines: usize) -> String 
     let r = lerp(start.0, end.0, t).round() as u8;
     let g = lerp(start.1, end.1, t).round() as u8;
     let b = lerp(start.2, end.2, t).round() as u8;
-    rgb_text(line, r, g, b)
-}
-
-fn rgb_text(text: &str, r: u8, g: u8, b: u8) -> String {
-    format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
-}
-
-/// Bright-purple foreground text.
-pub(crate) fn purple(text: &str) -> String {
-    rgb_text(text, PURPLE.0, PURPLE.1, PURPLE.2)
-}
-
-/// Bold bright-purple foreground text.
-pub(crate) fn purple_bold(text: &str) -> String {
-    format!(
-        "\x1b[1m\x1b[38;2;{};{};{}m{text}\x1b[0m",
-        PURPLE.0, PURPLE.1, PURPLE.2
-    )
-}
-
-/// Dimmed grey foreground text.
-pub(crate) fn dim(text: &str) -> String {
-    rgb_text(text, 140, 140, 140)
+    theme::rgb(line, (r, g, b))
 }
 
 fn lerp(start: f32, end: f32, t: f32) -> f32 {

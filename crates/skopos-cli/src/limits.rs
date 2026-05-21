@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{dim, purple, purple_bold};
+use crate::theme::{anthropic_orange, dim, purple, purple_bold};
 
 /// Persisted snapshot of the last statusline payload. One file per host;
 /// only `anthropic` today.
@@ -519,17 +519,6 @@ pub(crate) fn progress_bar(pct: f64, width: usize) -> String {
         bar.push('░');
     }
     bar
-}
-
-/// Anthropic brand orange — the only fill colour used for Claude bars,
-/// regardless of how full they are. Matches `ProviderId::Claude.color()`
-/// in `providers.rs`.
-fn anthropic_orange(text: &str) -> String {
-    rgb(text, 204, 120, 50)
-}
-
-fn rgb(text: &str, r: u8, g: u8, b: u8) -> String {
-    format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
 }
 
 // ===========================================================================

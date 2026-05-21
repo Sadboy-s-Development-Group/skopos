@@ -51,15 +51,9 @@ pub(crate) fn run_uninstall(user: bool) -> anyhow::Result<String> {
 // Shared rendering helpers (visible to the child modules)
 // ===========================================================================
 
-/// Truecolor foreground text.
-fn rgb(text: &str, (r, g, b): (u8, u8, u8)) -> String {
-    format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
-}
-
-/// Bold truecolor foreground text.
-fn rgb_bold(text: &str, (r, g, b): (u8, u8, u8)) -> String {
-    format!("\x1b[1m\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
-}
+/// Pulled into this module so the child modules can reach them as
+/// `super::rgb` / `super::rgb_bold`, matching how they read `super::hostname`.
+use crate::theme::{rgb, rgb_bold};
 
 /// Best-effort hostname of this machine.
 fn hostname() -> String {
