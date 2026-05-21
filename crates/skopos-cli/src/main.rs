@@ -1,23 +1,11 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use providers::ProviderId;
-use skopos_collectors::claude_code::{
-    discover_claude_code_jsonl_paths, parse_usage_events_from_jsonl_path,
-};
-use skopos_collectors::codex::{
-    discover_codex_rollout_paths, parse_usage_events_from_rollout_path,
-};
-use skopos_collectors::gemini::{
-    discover_gemini_session_paths, parse_usage_events_from_session_path,
-};
-use skopos_core::UsageEvent;
 use skopos_pricing::{default_overrides_path, Catalog};
 use skopos_store::SkoposStore;
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::BTreeMap, path::PathBuf};
 
+mod agent;
 mod codex_limits;
 mod config;
 mod format;
@@ -32,6 +20,7 @@ mod splash;
 mod theme;
 mod work;
 
+use agent::{auto_import_if_stale, import_report, scan, Agent};
 use format::{
     human_tokens, month_range, render_table, thousands, today_range, week_range, UsagePeriod,
 };
@@ -315,22 +304,22 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Command::Providers { db }) => {
             let db_path = db.unwrap_or_else(default_db_path);
-            auto_import_codex_if_stale(&db_path).await;
-            auto_import_gemini_if_stale(&db_path).await;
+            auto_import_if_stale(Agent::Codex, &db_path).await;
+            auto_import_if_stale(Agent::Gemini, &db_path).await;
             print!("{}", providers_report(&db_path).await?);
         }
         Some(Command::Usage { command }) => match command {
             None => print!("{}", usage_limits_report().await?),
             Some(UsageCommand::ByModel { db }) => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_codex_if_stale(&db_path).await;
-                auto_import_gemini_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Codex, &db_path).await;
+                auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!("{}", usage_by_model_report(&db_path).await?);
             }
             Some(UsageCommand::Today { db }) => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_codex_if_stale(&db_path).await;
-                auto_import_gemini_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Codex, &db_path).await;
+                auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report(&db_path, UsagePeriod::Today).await?
@@ -338,8 +327,8 @@ async fn main() -> anyhow::Result<()> {
             }
             Some(UsageCommand::Month { db }) => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_codex_if_stale(&db_path).await;
-                auto_import_gemini_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Codex, &db_path).await;
+                auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report(&db_path, UsagePeriod::Month).await?
@@ -353,7 +342,7 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Some(Command::Claude { command }) => match command {
-            ClaudeCommand::Scan { path } => scan_claude(path)?,
+            ClaudeCommand::Scan { path } => print!("{}", scan(Agent::Claude, path)?),
             ClaudeCommand::Import { path, db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!("{}", import_report("anthropic", path, &db_path).await?);
@@ -393,14 +382,14 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Codex { command }) => match command {
             CodexCommand::Usage => print!("{}", codex_usage_report()?),
             CodexCommand::Refresh => print!("{}", codex_refresh_report().await?),
-            CodexCommand::Scan { path } => scan_codex(path)?,
+            CodexCommand::Scan { path } => print!("{}", scan(Agent::Codex, path)?),
             CodexCommand::Import { path, db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!("{}", import_report("openai", path, &db_path).await?);
             }
             CodexCommand::Today { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_codex_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Codex, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report_filtered(&db_path, UsagePeriod::Today, Some("openai"))
@@ -409,7 +398,7 @@ async fn main() -> anyhow::Result<()> {
             }
             CodexCommand::Week { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_codex_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Codex, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report_filtered(&db_path, UsagePeriod::Week, Some("openai"))
@@ -418,7 +407,7 @@ async fn main() -> anyhow::Result<()> {
             }
             CodexCommand::Month { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_codex_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Codex, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report_filtered(&db_path, UsagePeriod::Month, Some("openai"))
@@ -427,7 +416,7 @@ async fn main() -> anyhow::Result<()> {
             }
             CodexCommand::Models { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_codex_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Codex, &db_path).await;
                 print!(
                     "{}",
                     usage_by_model_report_filtered(&db_path, Some("openai")).await?
@@ -435,14 +424,14 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Some(Command::Gemini { command }) => match command {
-            GeminiCommand::Scan { path } => scan_gemini(path)?,
+            GeminiCommand::Scan { path } => print!("{}", scan(Agent::Gemini, path)?),
             GeminiCommand::Import { path, db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!("{}", import_report("google", path, &db_path).await?);
             }
             GeminiCommand::Today { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_gemini_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report_filtered(&db_path, UsagePeriod::Today, Some("google"))
@@ -451,7 +440,7 @@ async fn main() -> anyhow::Result<()> {
             }
             GeminiCommand::Week { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_gemini_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report_filtered(&db_path, UsagePeriod::Week, Some("google"))
@@ -460,7 +449,7 @@ async fn main() -> anyhow::Result<()> {
             }
             GeminiCommand::Month { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_gemini_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
                     "{}",
                     usage_period_report_filtered(&db_path, UsagePeriod::Month, Some("google"))
@@ -469,7 +458,7 @@ async fn main() -> anyhow::Result<()> {
             }
             GeminiCommand::Models { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
-                auto_import_gemini_if_stale(&db_path).await;
+                auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
                     "{}",
                     usage_by_model_report_filtered(&db_path, Some("google")).await?
@@ -701,47 +690,6 @@ fn run_uninstall(force: bool) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn scan_claude(path: Option<PathBuf>) -> anyhow::Result<()> {
-    let claude_home = path.unwrap_or_else(default_claude_home);
-    let jsonl_paths = discover_claude_code_jsonl_paths(&claude_home)?;
-    let mut model_totals: BTreeMap<String, ModelUsageSummary> = BTreeMap::new();
-    let mut event_count = 0u64;
-
-    for path in &jsonl_paths {
-        for event in parse_usage_events_from_jsonl_path(path)? {
-            event_count += 1;
-            let summary = model_totals.entry(event.model.0).or_default();
-            summary.input_tokens += event.input_tokens;
-            summary.cached_input_tokens += event.cached_input_tokens.unwrap_or(0);
-            summary.output_tokens += event.output_tokens;
-            summary.total_tokens += event.total_tokens;
-        }
-    }
-
-    println!("Claude Code scan");
-    println!("home:   {}", claude_home.display());
-    println!("files:  {}", jsonl_paths.len());
-    println!("events: {}", event_count);
-
-    if model_totals.is_empty() {
-        println!("models: none found");
-        return Ok(());
-    }
-
-    println!("models:");
-    for (model, summary) in model_totals {
-        println!(
-            "  {model}: total={} input={} cached_input={} output={}",
-            summary.total_tokens,
-            summary.input_tokens,
-            summary.cached_input_tokens,
-            summary.output_tokens
-        );
-    }
-
-    Ok(())
-}
-
 pub(crate) async fn providers_report(db_path: impl Into<PathBuf>) -> anyhow::Result<String> {
     let store = SkoposStore::connect_path(db_path.into()).await?;
     store.migrate().await?;
@@ -955,405 +903,6 @@ fn estimate_period_cost(
     (total, unpriced)
 }
 
-async fn import_claude_from_home(
-    claude_home: impl Into<PathBuf>,
-    db_path: impl Into<PathBuf>,
-) -> anyhow::Result<ClaudeImportReport> {
-    let claude_home = claude_home.into();
-    let db_path = db_path.into();
-
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let store = SkoposStore::connect_path(&db_path).await?;
-    store.migrate().await?;
-
-    let jsonl_paths = discover_claude_code_jsonl_paths(&claude_home)?;
-    let mut report = ClaudeImportReport {
-        files: jsonl_paths.len() as u64,
-        ..Default::default()
-    };
-
-    for path in jsonl_paths {
-        for event in parse_usage_events_from_jsonl_path(path)? {
-            report.seen_events += 1;
-            let dedupe_key = claude_usage_dedupe_key(&event);
-            let result = store.insert_usage_event_once(&event, &dedupe_key).await?;
-            if result.inserted {
-                report.inserted_events += 1;
-            } else {
-                report.duplicate_events += 1;
-            }
-        }
-    }
-
-    Ok(report)
-}
-
-fn claude_usage_dedupe_key(event: &UsageEvent) -> String {
-    if let Some(uuid) = event
-        .metadata
-        .get("claude_code_uuid")
-        .and_then(|value| value.as_str())
-    {
-        return format!("claude-code:uuid:{uuid}");
-    }
-
-    if let (Some(session_id), Some(request_id)) = (&event.session_id, &event.request_id) {
-        return format!("claude-code:session:{session_id}:request:{request_id}");
-    }
-
-    format!(
-        "claude-code:fallback:{}:{}:{}:{}:{}",
-        event.timestamp.to_rfc3339(),
-        event.model.0,
-        event.input_tokens,
-        event.cached_input_tokens.unwrap_or(0),
-        event.output_tokens
-    )
-}
-
-fn default_claude_home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude")
-}
-
-fn default_codex_home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".codex")
-}
-
-fn scan_codex(path: Option<PathBuf>) -> anyhow::Result<()> {
-    let codex_home = path.unwrap_or_else(default_codex_home);
-    let jsonl_paths = discover_codex_rollout_paths(&codex_home)?;
-    let mut model_totals: BTreeMap<String, ModelUsageSummary> = BTreeMap::new();
-    let mut event_count = 0u64;
-
-    for path in &jsonl_paths {
-        for event in parse_usage_events_from_rollout_path(path)? {
-            event_count += 1;
-            let summary = model_totals.entry(event.model.0).or_default();
-            summary.input_tokens += event.input_tokens;
-            summary.cached_input_tokens += event.cached_input_tokens.unwrap_or(0);
-            summary.output_tokens += event.output_tokens;
-            summary.total_tokens += event.total_tokens;
-        }
-    }
-
-    println!("Codex scan");
-    println!("home:   {}", codex_home.display());
-    println!("files:  {}", jsonl_paths.len());
-    println!("events: {}", event_count);
-
-    if model_totals.is_empty() {
-        println!("models: none found");
-        return Ok(());
-    }
-
-    println!("models:");
-    for (model, summary) in model_totals {
-        println!(
-            "  {model}: total={} input={} cached_input={} output={}",
-            summary.total_tokens,
-            summary.input_tokens,
-            summary.cached_input_tokens,
-            summary.output_tokens
-        );
-    }
-
-    Ok(())
-}
-
-async fn import_codex_from_home(
-    codex_home: impl Into<PathBuf>,
-    db_path: impl Into<PathBuf>,
-) -> anyhow::Result<CodexImportReport> {
-    let codex_home = codex_home.into();
-    let db_path = db_path.into();
-
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let store = SkoposStore::connect_path(&db_path).await?;
-    store.migrate().await?;
-
-    let jsonl_paths = discover_codex_rollout_paths(&codex_home)?;
-    let mut report = CodexImportReport {
-        files: jsonl_paths.len() as u64,
-        ..Default::default()
-    };
-
-    for path in jsonl_paths {
-        for event in parse_usage_events_from_rollout_path(path)? {
-            report.seen_events += 1;
-            let dedupe_key = codex_usage_dedupe_key(&event);
-            let result = store.insert_usage_event_once(&event, &dedupe_key).await?;
-            if result.inserted {
-                report.inserted_events += 1;
-            } else {
-                report.duplicate_events += 1;
-            }
-        }
-    }
-
-    Ok(report)
-}
-
-/// Idempotent best-effort import: if `~/.codex/sessions/` has rollout
-/// JSONLs whose mtime is newer than the latest `provider="openai"`
-/// event in the store, run a full import. The collector already
-/// dedupes per `session:turn:ts` so a full sweep is safe.
-///
-/// All errors are swallowed silently — this hook must never break the
-/// report that called it. The caller still gets to render whatever the
-/// store has.
-pub(crate) async fn auto_import_codex_if_stale(db_path: &Path) {
-    if let Err(err) = try_auto_import_codex(db_path).await {
-        eprintln!("{}", dim(&format!("  (codex auto-import skipped: {err})")));
-    }
-}
-
-async fn try_auto_import_codex(db_path: &Path) -> anyhow::Result<()> {
-    use anyhow::Context;
-
-    let codex_home = default_codex_home();
-    let sessions_root = codex_home.join("sessions");
-    if !sessions_root.exists() {
-        return Ok(());
-    }
-
-    let store = SkoposStore::connect_path(db_path)
-        .await
-        .context("connect skopos store")?;
-    store.migrate().await.context("migrate skopos store")?;
-    let last = store
-        .latest_usage_event_timestamp_for_provider("openai")
-        .await
-        .context("read latest openai timestamp")?;
-    drop(store);
-
-    if !jsonls_newer_than(&sessions_root, last)? {
-        return Ok(());
-    }
-
-    let _ = import_codex_from_home(codex_home, db_path).await?;
-    Ok(())
-}
-
-/// Walk `<root>/**/*.jsonl` looking for any file with `mtime >
-/// threshold`. Returns `Ok(true)` on first hit, `Ok(false)` if nothing
-/// is newer. If `threshold` is `None`, any jsonl counts as "newer"
-/// (i.e. first-time import).
-pub(crate) fn jsonls_newer_than(
-    sessions_root: &Path,
-    threshold: Option<DateTime<Utc>>,
-) -> anyhow::Result<bool> {
-    use std::time::SystemTime;
-    let threshold_st = threshold.map(|t| {
-        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(t.timestamp().max(0) as u64)
-    });
-
-    for entry in walkdir_jsonl(sessions_root)? {
-        let mtime = std::fs::metadata(&entry)?.modified()?;
-        match threshold_st {
-            None => return Ok(true),
-            Some(t) if mtime > t => return Ok(true),
-            _ => {}
-        }
-    }
-    Ok(false)
-}
-
-fn walkdir_jsonl(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let mut out = Vec::new();
-    walkdir_jsonl_inner(root, &mut out)?;
-    Ok(out)
-}
-
-fn walkdir_jsonl_inner(dir: &Path, out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_type()?.is_dir() {
-            walkdir_jsonl_inner(&path, out)?;
-        } else if path.extension().is_some_and(|e| e == "jsonl") {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn codex_usage_dedupe_key(event: &UsageEvent) -> String {
-    match (&event.session_id, &event.request_id) {
-        (Some(session), Some(turn)) => format!(
-            "codex:session:{session}:turn:{turn}:ts:{}",
-            event.timestamp.to_rfc3339()
-        ),
-        (Some(session), None) => format!(
-            "codex:session:{session}:ts:{}",
-            event.timestamp.to_rfc3339()
-        ),
-        _ => format!(
-            "codex:fallback:{}:{}:{}:{}:{}",
-            event.timestamp.to_rfc3339(),
-            event.model.0,
-            event.input_tokens,
-            event.cached_input_tokens.unwrap_or(0),
-            event.output_tokens,
-        ),
-    }
-}
-
-fn default_gemini_home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".gemini")
-}
-
-fn scan_gemini(path: Option<PathBuf>) -> anyhow::Result<()> {
-    let gemini_home = path.unwrap_or_else(default_gemini_home);
-    let jsonl_paths = discover_gemini_session_paths(&gemini_home)?;
-    let mut model_totals: BTreeMap<String, ModelUsageSummary> = BTreeMap::new();
-    let mut event_count = 0u64;
-
-    for path in &jsonl_paths {
-        for event in parse_usage_events_from_session_path(path)? {
-            event_count += 1;
-            let summary = model_totals.entry(event.model.0).or_default();
-            summary.input_tokens += event.input_tokens;
-            summary.cached_input_tokens += event.cached_input_tokens.unwrap_or(0);
-            summary.output_tokens += event.output_tokens;
-            summary.total_tokens += event.total_tokens;
-        }
-    }
-
-    println!("Gemini scan");
-    println!("home:   {}", gemini_home.display());
-    println!("files:  {}", jsonl_paths.len());
-    println!("events: {}", event_count);
-
-    if model_totals.is_empty() {
-        println!("models: none found");
-        return Ok(());
-    }
-
-    println!("models:");
-    for (model, summary) in model_totals {
-        println!(
-            "  {model}: total={} input={} cached_input={} output={}",
-            summary.total_tokens,
-            summary.input_tokens,
-            summary.cached_input_tokens,
-            summary.output_tokens
-        );
-    }
-
-    Ok(())
-}
-
-async fn import_gemini_from_home(
-    gemini_home: impl Into<PathBuf>,
-    db_path: impl Into<PathBuf>,
-) -> anyhow::Result<GeminiImportReport> {
-    let gemini_home = gemini_home.into();
-    let db_path = db_path.into();
-
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let store = SkoposStore::connect_path(&db_path).await?;
-    store.migrate().await?;
-
-    let jsonl_paths = discover_gemini_session_paths(&gemini_home)?;
-    let mut report = GeminiImportReport {
-        files: jsonl_paths.len() as u64,
-        ..Default::default()
-    };
-
-    for path in jsonl_paths {
-        for event in parse_usage_events_from_session_path(path)? {
-            report.seen_events += 1;
-            let dedupe_key = gemini_usage_dedupe_key(&event);
-            let result = store.insert_usage_event_once(&event, &dedupe_key).await?;
-            if result.inserted {
-                report.inserted_events += 1;
-            } else {
-                report.duplicate_events += 1;
-            }
-        }
-    }
-
-    Ok(report)
-}
-
-fn gemini_usage_dedupe_key(event: &UsageEvent) -> String {
-    match (&event.session_id, &event.request_id) {
-        (Some(session), Some(msg)) => format!("gemini:session:{session}:msg:{msg}"),
-        (Some(session), None) => format!(
-            "gemini:session:{session}:ts:{}",
-            event.timestamp.to_rfc3339()
-        ),
-        _ => format!(
-            "gemini:fallback:{}:{}:{}:{}",
-            event.timestamp.to_rfc3339(),
-            event.model.0,
-            event.input_tokens,
-            event.output_tokens,
-        ),
-    }
-}
-
-/// Idempotent best-effort import: if `~/.gemini/tmp/` has session
-/// JSONLs whose mtime is newer than the latest `provider="google"`
-/// event in the store, run a full import. The collector already
-/// dedupes per `session:msg` so a full sweep is safe.
-///
-/// All errors are swallowed silently — this hook must never break the
-/// report that called it.
-pub(crate) async fn auto_import_gemini_if_stale(db_path: &Path) {
-    if let Err(err) = try_auto_import_gemini(db_path).await {
-        eprintln!("{}", dim(&format!("  (gemini auto-import skipped: {err})")));
-    }
-}
-
-async fn try_auto_import_gemini(db_path: &Path) -> anyhow::Result<()> {
-    use anyhow::Context;
-
-    let gemini_home = default_gemini_home();
-    let tmp_root = gemini_home.join("tmp");
-    if !tmp_root.exists() {
-        return Ok(());
-    }
-
-    let store = SkoposStore::connect_path(db_path)
-        .await
-        .context("connect skopos store")?;
-    store.migrate().await.context("migrate skopos store")?;
-    let last = store
-        .latest_usage_event_timestamp_for_provider("google")
-        .await
-        .context("read latest google timestamp")?;
-    drop(store);
-
-    if !jsonls_newer_than(&tmp_root, last)? {
-        return Ok(());
-    }
-
-    let _ = import_gemini_from_home(gemini_home, db_path).await?;
-    Ok(())
-}
-
 fn default_db_path() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -1364,104 +913,9 @@ fn default_db_path() -> PathBuf {
         .join("skopos.db")
 }
 
-/// Run a token-log import for one provider into `db_path` and return the
-/// formatted report block. Shared by the `skopos <agent> import`
-/// subcommands and the REPL's `<agent> import` command. `home` overrides
-/// the agent's default home directory when `Some`.
-pub(crate) async fn import_report(
-    provider: &str,
-    home: Option<PathBuf>,
-    db_path: &Path,
-) -> anyhow::Result<String> {
-    let (label, home, files, seen, inserted, duplicates) = match provider {
-        "anthropic" => {
-            let home = home.unwrap_or_else(default_claude_home);
-            let r = import_claude_from_home(&home, db_path).await?;
-            (
-                "Claude Code import",
-                home,
-                r.files,
-                r.seen_events,
-                r.inserted_events,
-                r.duplicate_events,
-            )
-        }
-        "openai" => {
-            let home = home.unwrap_or_else(default_codex_home);
-            let r = import_codex_from_home(&home, db_path).await?;
-            (
-                "Codex import",
-                home,
-                r.files,
-                r.seen_events,
-                r.inserted_events,
-                r.duplicate_events,
-            )
-        }
-        "google" => {
-            let home = home.unwrap_or_else(default_gemini_home);
-            let r = import_gemini_from_home(&home, db_path).await?;
-            (
-                "Gemini import",
-                home,
-                r.files,
-                r.seen_events,
-                r.inserted_events,
-                r.duplicate_events,
-            )
-        }
-        other => anyhow::bail!("import: unknown provider {other:?}"),
-    };
-
-    Ok(format!(
-        "{label}\n\
-         home:       {}\n\
-         db:         {}\n\
-         files:      {files}\n\
-         seen:       {seen}\n\
-         inserted:   {inserted}\n\
-         duplicates: {duplicates}\n",
-        home.display(),
-        db_path.display(),
-    ))
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-struct ClaudeImportReport {
-    files: u64,
-    seen_events: u64,
-    inserted_events: u64,
-    duplicate_events: u64,
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-struct CodexImportReport {
-    files: u64,
-    seen_events: u64,
-    inserted_events: u64,
-    duplicate_events: u64,
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-struct GeminiImportReport {
-    files: u64,
-    seen_events: u64,
-    inserted_events: u64,
-    duplicate_events: u64,
-}
-
-#[derive(Debug, Default)]
-struct ModelUsageSummary {
-    input_tokens: u64,
-    cached_input_tokens: u64,
-    output_tokens: u64,
-    total_tokens: u64,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use skopos_store::SkoposStore;
 
     #[tokio::test]
@@ -1483,7 +937,7 @@ mod tests {
             r#"{"message":{"model":"claude-opus-4-7","id":"msg_a","role":"assistant","usage":{"input_tokens":2,"cache_read_input_tokens":5,"output_tokens":3}},"timestamp":"2026-05-13T19:58:08.012Z","cwd":"/tmp/project","sessionId":"s1"}"#,
         )
         .unwrap();
-        import_claude_from_home(&claude_home, &db_path)
+        agent::import_from_home(Agent::Claude, &claude_home, &db_path)
             .await
             .unwrap();
 
@@ -1524,53 +978,5 @@ mod tests {
         let (total, unpriced) = estimate_period_cost(&catalog, &rows);
         assert!((total - 5.0).abs() < 1e-9);
         assert_eq!(unpriced, vec![("mystery".to_string(), "ghost".to_string())]);
-    }
-
-    #[test]
-    fn jsonls_newer_than_handles_empty_and_mtime_cases() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::{Duration, SystemTime};
-
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let unique = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let temp_dir = std::env::temp_dir().join(format!(
-            "skopos-cli-auto-import-test-{}-{}",
-            std::process::id(),
-            unique,
-        ));
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let sessions = temp_dir.join("sessions");
-        let day_dir = sessions.join("2026").join("05").join("18");
-        std::fs::create_dir_all(&day_dir).unwrap();
-
-        // 1. Empty sessions dir (no jsonl files) → false.
-        assert!(!jsonls_newer_than(&sessions, None).unwrap());
-
-        // 2. One rollout, no threshold → true.
-        let rollout = day_dir.join("rollout-test.jsonl");
-        std::fs::write(&rollout, "{}\n").unwrap();
-        assert!(jsonls_newer_than(&sessions, None).unwrap());
-
-        // Pin the rollout's mtime to a known instant so the comparisons below
-        // don't race with the filesystem clock.
-        let pinned = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&rollout)
-            .unwrap();
-        file.set_modified(pinned).unwrap();
-        drop(file);
-
-        // 3. Threshold strictly newer than the file → false.
-        let newer_threshold = Utc.timestamp_opt((1_700_000_000 + 60) as i64, 0).unwrap();
-        assert!(!jsonls_newer_than(&sessions, Some(newer_threshold)).unwrap());
-
-        // 4. Threshold strictly older than the file → true.
-        let older_threshold = Utc.timestamp_opt((1_700_000_000 - 60) as i64, 0).unwrap();
-        assert!(jsonls_newer_than(&sessions, Some(older_threshold)).unwrap());
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
