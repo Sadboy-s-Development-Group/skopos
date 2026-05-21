@@ -18,8 +18,9 @@ use crossterm::{
 };
 
 use crate::{
-    config, dim, network, providers_report, purple, purple_bold, usage_by_model_report_filtered,
-    usage_limits_report, usage_period_report_filtered, work, UsagePeriod,
+    config, dim, import_report, network, providers_report, purple, purple_bold,
+    usage_by_model_report_filtered, usage_limits_report, usage_period_report_filtered, work,
+    UsagePeriod,
 };
 
 /// Run the interactive Skopos shell against `db_path`.
@@ -78,6 +79,9 @@ pub(crate) async fn run(db_path: &Path) -> anyhow::Result<()> {
                     Command::Period(period, provider) => report_or_error(
                         usage_period_report_filtered(db_path, period, provider.as_deref()).await,
                     ),
+                    Command::Import(provider) => {
+                        report_or_error(import_report(&provider, None, db_path).await)
+                    }
                     Command::Usage => report_or_error(usage_limits_report().await),
                     Command::UsageInstallHint => {
                         println!(
@@ -149,6 +153,9 @@ enum Command {
     Providers,
     Models(Option<String>),
     Period(UsagePeriod, Option<String>),
+    /// Import an agent's local logs into SQLite; carries the provider id
+    /// (`anthropic` / `openai` / `google`).
+    Import(String),
     Work,
     Usage,
     UsageInstallHint,
@@ -181,6 +188,10 @@ fn parse_period_args(prefix: &str, args: &[&str], provider: Option<&str>) -> Com
         ["-w"] | ["--week"] | ["week"] => Command::Period(UsagePeriod::Week, provider),
         ["-m"] | ["--month"] | ["month"] => Command::Period(UsagePeriod::Month, provider),
         ["models"] | ["-M"] | ["--models"] => Command::Models(provider),
+        ["import"] => match provider {
+            Some(provider) => Command::Import(provider),
+            None => Command::Unknown(format!("{prefix} import")),
+        },
         _ => Command::Unknown(format!("{prefix} {}", args.join(" "))),
     }
 }
@@ -207,18 +218,9 @@ fn help_text() -> String {
         ("gemini -m", "Gemini usage this month (token totals)"),
         ("gemini models", "Gemini usage grouped by model"),
         ("providers", "list tracked providers"),
-        (
-            "claude import",
-            "import Claude Code logs (run: skopos claude import)",
-        ),
-        (
-            "codex import",
-            "import Codex rollout JSONLs (run: skopos codex import)",
-        ),
-        (
-            "gemini import",
-            "import Gemini session JSONLs (run: skopos gemini import)",
-        ),
+        ("claude import", "import Claude Code logs into SQLite"),
+        ("codex import", "import Codex rollout JSONLs into SQLite"),
+        ("gemini import", "import Gemini session JSONLs into SQLite"),
         ("clear", "clear the screen and redraw the splash"),
         ("help", "show this help"),
         ("exit / quit", "leave skopos"),
@@ -533,6 +535,22 @@ mod tests {
         assert!(matches!(parse_command("help"), Command::Help));
         assert!(matches!(parse_command("clear"), Command::Clear));
         assert!(matches!(parse_command("providers"), Command::Providers));
+    }
+
+    #[test]
+    fn parses_import_commands() {
+        assert!(matches!(
+            parse_command("claude import"),
+            Command::Import(ref p) if p == "anthropic"
+        ));
+        assert!(matches!(
+            parse_command("codex import"),
+            Command::Import(ref p) if p == "openai"
+        ));
+        assert!(matches!(
+            parse_command("  gemini   import  "),
+            Command::Import(ref p) if p == "google"
+        ));
     }
 
     #[test]

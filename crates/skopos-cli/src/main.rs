@@ -347,16 +347,8 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Claude { command }) => match command {
             ClaudeCommand::Scan { path } => scan_claude(path)?,
             ClaudeCommand::Import { path, db } => {
-                let claude_home = path.unwrap_or_else(default_claude_home);
                 let db_path = db.unwrap_or_else(default_db_path);
-                let report = import_claude_from_home(&claude_home, &db_path).await?;
-                println!("Claude Code import");
-                println!("home:       {}", claude_home.display());
-                println!("db:         {}", db_path.display());
-                println!("files:      {}", report.files);
-                println!("seen:       {}", report.seen_events);
-                println!("inserted:   {}", report.inserted_events);
-                println!("duplicates: {}", report.duplicate_events);
+                print!("{}", import_report("anthropic", path, &db_path).await?);
             }
             ClaudeCommand::Today { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
@@ -395,16 +387,8 @@ async fn main() -> anyhow::Result<()> {
             CodexCommand::Refresh => print!("{}", codex_refresh_report().await?),
             CodexCommand::Scan { path } => scan_codex(path)?,
             CodexCommand::Import { path, db } => {
-                let codex_home = path.unwrap_or_else(default_codex_home);
                 let db_path = db.unwrap_or_else(default_db_path);
-                let report = import_codex_from_home(&codex_home, &db_path).await?;
-                println!("Codex import");
-                println!("home:       {}", codex_home.display());
-                println!("db:         {}", db_path.display());
-                println!("files:      {}", report.files);
-                println!("seen:       {}", report.seen_events);
-                println!("inserted:   {}", report.inserted_events);
-                println!("duplicates: {}", report.duplicate_events);
+                print!("{}", import_report("openai", path, &db_path).await?);
             }
             CodexCommand::Today { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
@@ -445,16 +429,8 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Gemini { command }) => match command {
             GeminiCommand::Scan { path } => scan_gemini(path)?,
             GeminiCommand::Import { path, db } => {
-                let gemini_home = path.unwrap_or_else(default_gemini_home);
                 let db_path = db.unwrap_or_else(default_db_path);
-                let report = import_gemini_from_home(&gemini_home, &db_path).await?;
-                println!("Gemini import");
-                println!("home:       {}", gemini_home.display());
-                println!("db:         {}", db_path.display());
-                println!("files:      {}", report.files);
-                println!("seen:       {}", report.seen_events);
-                println!("inserted:   {}", report.inserted_events);
-                println!("duplicates: {}", report.duplicate_events);
+                print!("{}", import_report("google", path, &db_path).await?);
             }
             GeminiCommand::Today { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
@@ -1669,6 +1645,68 @@ fn default_db_path() -> PathBuf {
         .join("share")
         .join("skopos")
         .join("skopos.db")
+}
+
+/// Run a token-log import for one provider into `db_path` and return the
+/// formatted report block. Shared by the `skopos <agent> import`
+/// subcommands and the REPL's `<agent> import` command. `home` overrides
+/// the agent's default home directory when `Some`.
+pub(crate) async fn import_report(
+    provider: &str,
+    home: Option<PathBuf>,
+    db_path: &Path,
+) -> anyhow::Result<String> {
+    let (label, home, files, seen, inserted, duplicates) = match provider {
+        "anthropic" => {
+            let home = home.unwrap_or_else(default_claude_home);
+            let r = import_claude_from_home(&home, db_path).await?;
+            (
+                "Claude Code import",
+                home,
+                r.files,
+                r.seen_events,
+                r.inserted_events,
+                r.duplicate_events,
+            )
+        }
+        "openai" => {
+            let home = home.unwrap_or_else(default_codex_home);
+            let r = import_codex_from_home(&home, db_path).await?;
+            (
+                "Codex import",
+                home,
+                r.files,
+                r.seen_events,
+                r.inserted_events,
+                r.duplicate_events,
+            )
+        }
+        "google" => {
+            let home = home.unwrap_or_else(default_gemini_home);
+            let r = import_gemini_from_home(&home, db_path).await?;
+            (
+                "Gemini import",
+                home,
+                r.files,
+                r.seen_events,
+                r.inserted_events,
+                r.duplicate_events,
+            )
+        }
+        other => anyhow::bail!("import: unknown provider {other:?}"),
+    };
+
+    Ok(format!(
+        "{label}\n\
+         home:       {}\n\
+         db:         {}\n\
+         files:      {files}\n\
+         seen:       {seen}\n\
+         inserted:   {inserted}\n\
+         duplicates: {duplicates}\n",
+        home.display(),
+        db_path.display(),
+    ))
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
