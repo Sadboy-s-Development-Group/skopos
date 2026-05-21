@@ -19,7 +19,8 @@ use skopos_collectors::claude_code::{
 };
 use skopos_core::UsageEvent;
 
-use crate::{dim, purple, purple_bold};
+use crate::format::{human_tokens, thousands};
+use crate::theme::{dim, purple, purple_bold};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct TokenTotals {
@@ -122,48 +123,17 @@ fn row(label: &str, totals: &TokenTotals) -> String {
     }
     let breakdown = format!(
         "{} inp · {} cached · {} out · {} events",
-        human(totals.input_tokens),
-        human(totals.cached_input_tokens),
-        human(totals.output_tokens),
+        human_tokens(totals.input_tokens as i64),
+        human_tokens(totals.cached_input_tokens as i64),
+        human_tokens(totals.output_tokens as i64),
         thousands(totals.events as i64),
     );
     format!(
         "    {}  {:>7} tokens   {}\n",
         purple(&format!("{label:<8}")),
-        human(totals.total_tokens),
+        human_tokens(totals.total_tokens as i64),
         dim(&breakdown),
     )
-}
-
-fn human(n: u64) -> String {
-    let x = n as f64;
-    if x < 1_000.0 {
-        return format!("{n}");
-    }
-    if x < 1_000_000.0 {
-        return format!("{:.1}K", x / 1_000.0);
-    }
-    if x < 1_000_000_000.0 {
-        return format!("{:.1}M", x / 1_000_000.0);
-    }
-    format!("{:.1}B", x / 1_000_000_000.0)
-}
-
-fn thousands(n: i64) -> String {
-    let digits = n.unsigned_abs().to_string();
-    let bytes = digits.as_bytes();
-    let mut out = String::new();
-    for (idx, byte) in bytes.iter().enumerate() {
-        if idx > 0 && (bytes.len() - idx).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(*byte as char);
-    }
-    if n < 0 {
-        format!("-{out}")
-    } else {
-        out
-    }
 }
 
 #[cfg(test)]
