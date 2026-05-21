@@ -138,7 +138,7 @@ fn report_or_error(result: anyhow::Result<String>) {
 
 fn print_splash() {
     let width = terminal::size().map(|(c, _)| c as usize).unwrap_or(80);
-    print!("{}", crate::welcome_screen(width));
+    print!("{}", crate::splash::welcome_screen(width));
     println!();
 }
 
