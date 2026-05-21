@@ -1,11 +1,11 @@
 use chrono::Utc;
-use clap::{Parser, Subcommand};
-use providers::ProviderId;
+use clap::Parser;
 use skopos_pricing::{default_overrides_path, Catalog};
 use skopos_store::SkoposStore;
 use std::{collections::BTreeMap, path::PathBuf};
 
 mod agent;
+mod cli;
 mod codex_limits;
 mod config;
 mod format;
@@ -21,273 +21,11 @@ mod theme;
 mod work;
 
 use agent::{auto_import_if_stale, import_report, scan, Agent};
+use cli::{AgentCommand, Cli, CodexCommand, Command, NetworkCommand, UsageCommand};
 use format::{
     human_tokens, month_range, render_table, thousands, today_range, week_range, UsagePeriod,
 };
 use theme::{dim, purple, purple_bold};
-
-#[derive(Debug, Parser)]
-#[command(name = "skopos")]
-#[command(about = "Skopos CLI control plane")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Show local Skopos status.
-    Status,
-    /// Print the planned local data paths.
-    Doctor,
-    /// List AI providers tracked in the local store. REPL alias: `providers`.
-    Providers {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Inspect persisted AI usage. With no subcommand, shows rate-limit
-    /// progress bars per provider (from the statusline snapshot).
-    Usage {
-        #[command(subcommand)]
-        command: Option<UsageCommand>,
-    },
-    /// Inspect or import Claude Code local usage logs.
-    Claude {
-        #[command(subcommand)]
-        command: ClaudeCommand,
-    },
-    /// Inspect Codex (ChatGPT) usage limits.
-    Codex {
-        #[command(subcommand)]
-        command: CodexCommand,
-    },
-    /// Inspect or import Gemini CLI local usage logs.
-    Gemini {
-        #[command(subcommand)]
-        command: GeminiCommand,
-    },
-    /// Pick a project and hand the terminal over to an agentic CLI.
-    Work {
-        /// Provider to launch. Defaults to the one in ~/.config/skopos/config.toml.
-        #[arg(long)]
-        provider: Option<ProviderId>,
-        /// Project root to list. Defaults to the one in ~/.config/skopos/config.toml.
-        #[arg(long)]
-        root: Option<PathBuf>,
-    },
-    /// Track internet connectivity. With no subcommand, opens the live
-    /// network-health dashboard.
-    Network {
-        #[command(subcommand)]
-        command: Option<NetworkCommand>,
-    },
-    /// Read the statusline JSON Claude Code pipes on stdin, persist the
-    /// rate-limit snapshot, and print a compact one-line view. Registered
-    /// by `skopos usage install`; not meant to be invoked by hand.
-    #[command(hide = true)]
-    Statusline,
-}
-
-#[derive(Debug, Subcommand)]
-enum NetworkCommand {
-    /// Run the connectivity probe loop in the foreground. This is what the
-    /// systemd unit runs; not normally invoked by hand.
-    Watch {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Print a one-shot network-health verdict and exit (0 stable, 1
-    /// moderate, 2 severe). Handy for MOTD banners and scripts.
-    Status {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Generate the systemd unit for the probe daemon.
-    Install {
-        /// Write a no-root per-user unit under ~/.config/systemd/user
-        /// instead of staging a system unit.
-        #[arg(long)]
-        user: bool,
-    },
-    /// Remove the systemd unit for the probe daemon.
-    Uninstall {
-        /// Target the per-user unit rather than the system unit.
-        #[arg(long)]
-        user: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum UsageCommand {
-    /// Show all-time usage grouped by provider/model.
-    ByModel {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show usage for today in UTC.
-    Today {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show usage for the current month in UTC.
-    Month {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Register the Skopos statusline hook in ~/.claude/settings.json so
-    /// rate-limit % data is captured while Claude Code runs.
-    Install {
-        /// Replace an existing statusLine hook if one is already set.
-        #[arg(long)]
-        force: bool,
-    },
-    /// Remove the Skopos statusline hook from ~/.claude/settings.json.
-    Uninstall {
-        /// Remove whatever statusLine is configured, even if it isn't ours.
-        #[arg(long)]
-        force: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum ClaudeCommand {
-    /// Scan Claude Code JSONL transcripts and summarize token usage without writing SQLite.
-    Scan {
-        /// Claude home directory. Defaults to ~/.claude.
-        #[arg(long)]
-        path: Option<PathBuf>,
-    },
-    /// Import Claude Code JSONL transcripts into Skopos SQLite.
-    Import {
-        /// Claude home directory. Defaults to ~/.claude.
-        #[arg(long)]
-        path: Option<PathBuf>,
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Claude usage for today (UTC). REPL alias: `claude -t`.
-    Today {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Claude usage for the current week (UTC). REPL alias: `claude -w`.
-    Week {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Claude usage for the current month (UTC). REPL alias: `claude -m`.
-    Month {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Claude usage grouped by model. REPL alias: `claude models`.
-    Models {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum CodexCommand {
-    /// Show Codex 5h / weekly limit bars from the cached snapshot
-    /// (refreshed on demand by `skopos codex refresh` or `skopos usage`).
-    Usage,
-    /// Fetch a fresh snapshot from the local Codex app-server and persist it.
-    Refresh,
-    /// Scan Codex rollout JSONLs and summarize token usage without writing SQLite.
-    Scan {
-        /// Codex home directory. Defaults to ~/.codex.
-        #[arg(long)]
-        path: Option<PathBuf>,
-    },
-    /// Import Codex rollout JSONLs into Skopos SQLite.
-    Import {
-        /// Codex home directory. Defaults to ~/.codex.
-        #[arg(long)]
-        path: Option<PathBuf>,
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Codex usage for today (UTC). REPL alias: `codex -t`.
-    Today {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Codex usage for the current week (UTC). REPL alias: `codex -w`.
-    Week {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Codex usage for the current month (UTC). REPL alias: `codex -m`.
-    Month {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Codex usage grouped by model. REPL alias: `codex models`.
-    Models {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum GeminiCommand {
-    /// Scan Gemini session JSONLs and summarize token usage without writing SQLite.
-    Scan {
-        /// Gemini home directory. Defaults to ~/.gemini.
-        #[arg(long)]
-        path: Option<PathBuf>,
-    },
-    /// Import Gemini session JSONLs into Skopos SQLite.
-    Import {
-        /// Gemini home directory. Defaults to ~/.gemini.
-        #[arg(long)]
-        path: Option<PathBuf>,
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Gemini usage for today (UTC). REPL alias: `gemini -t`.
-    Today {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Gemini usage for the current week (UTC). REPL alias: `gemini -w`.
-    Week {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Gemini usage for the current month (UTC). REPL alias: `gemini -m`.
-    Month {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-    /// Show Gemini usage grouped by model. REPL alias: `gemini models`.
-    Models {
-        /// SQLite database path. Defaults to ~/.local/share/skopos/skopos.db.
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -342,12 +80,12 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Some(Command::Claude { command }) => match command {
-            ClaudeCommand::Scan { path } => print!("{}", scan(Agent::Claude, path)?),
-            ClaudeCommand::Import { path, db } => {
+            AgentCommand::Scan { path } => print!("{}", scan(Agent::Claude, path)?),
+            AgentCommand::Import { path, db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!("{}", import_report("anthropic", path, &db_path).await?);
             }
-            ClaudeCommand::Today { db } => {
+            AgentCommand::Today { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!(
                     "{}",
@@ -355,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
                         .await?
                 );
             }
-            ClaudeCommand::Week { db } => {
+            AgentCommand::Week { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!(
                     "{}",
@@ -363,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
                         .await?
                 );
             }
-            ClaudeCommand::Month { db } => {
+            AgentCommand::Month { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!(
                     "{}",
@@ -371,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
                         .await?
                 );
             }
-            ClaudeCommand::Models { db } => {
+            AgentCommand::Models { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!(
                     "{}",
@@ -424,12 +162,12 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Some(Command::Gemini { command }) => match command {
-            GeminiCommand::Scan { path } => print!("{}", scan(Agent::Gemini, path)?),
-            GeminiCommand::Import { path, db } => {
+            AgentCommand::Scan { path } => print!("{}", scan(Agent::Gemini, path)?),
+            AgentCommand::Import { path, db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 print!("{}", import_report("google", path, &db_path).await?);
             }
-            GeminiCommand::Today { db } => {
+            AgentCommand::Today { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
@@ -438,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
                         .await?
                 );
             }
-            GeminiCommand::Week { db } => {
+            AgentCommand::Week { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
@@ -447,7 +185,7 @@ async fn main() -> anyhow::Result<()> {
                         .await?
                 );
             }
-            GeminiCommand::Month { db } => {
+            AgentCommand::Month { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
@@ -456,7 +194,7 @@ async fn main() -> anyhow::Result<()> {
                         .await?
                 );
             }
-            GeminiCommand::Models { db } => {
+            AgentCommand::Models { db } => {
                 let db_path = db.unwrap_or_else(default_db_path);
                 auto_import_if_stale(Agent::Gemini, &db_path).await;
                 print!(
