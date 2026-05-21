@@ -38,7 +38,7 @@ impl Agent {
     }
 
     /// The `provider` column value this agent's events are stored under.
-    fn provider(self) -> &'static str {
+    pub(crate) fn provider(self) -> &'static str {
         match self {
             Agent::Claude => "anthropic",
             Agent::Codex => "openai",

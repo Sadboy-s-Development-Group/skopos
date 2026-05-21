@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use crate::install::skopos_binary_path;
 use crate::limits::home_dir;
-use crate::{dim, purple, purple_bold};
+use crate::theme::{dim, purple, purple_bold};
 
 const UNIT_NAME: &str = "skopos-netwatch.service";
 

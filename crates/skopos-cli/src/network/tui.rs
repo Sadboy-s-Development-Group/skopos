@@ -22,7 +22,7 @@ use skopos_store::{NetworkOutage, NetworkSample, SkoposStore};
 
 use crate::config::Config;
 use crate::limits::{humanise_relative_past, progress_bar};
-use crate::{dim, purple, purple_bold};
+use crate::theme::{dim, purple, purple_bold};
 
 use super::health::{self, HealthReport, HealthThresholds};
 use super::{hostname, rgb, rgb_bold};

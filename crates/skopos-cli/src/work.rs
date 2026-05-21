@@ -20,9 +20,9 @@ use crossterm::{
 };
 
 use crate::config::Config;
-use crate::dim;
 use crate::icons::{self, ProjectIcon};
 use crate::providers::{self, ProviderId};
+use crate::theme::dim;
 
 /// Hint footer shown under the picker.
 const HINT: &str = "  ↑/↓ project  ·  ←/→ provider  ·  enter open  ·  esc cancel";

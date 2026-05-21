@@ -17,11 +17,14 @@ use crossterm::{
     terminal::{self, Clear, ClearType},
 };
 
-use crate::{
-    config, dim, import_report, network, providers_report, purple, purple_bold,
-    usage_by_model_report_filtered, usage_limits_report, usage_period_report_filtered, work,
-    UsagePeriod,
+use crate::agent::import_report;
+use crate::format::UsagePeriod;
+use crate::report::{
+    providers_report, usage_by_model_report_filtered, usage_limits_report,
+    usage_period_report_filtered,
 };
+use crate::theme::{dim, purple, purple_bold};
+use crate::{config, network, work};
 
 /// Run the interactive Skopos shell against `db_path`.
 ///
