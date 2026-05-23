@@ -101,6 +101,14 @@ pub(crate) fn run(check_only: bool) -> anyhow::Result<String> {
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
         .bin_name(BIN_NAME)
+        // Release tarballs wrap the binary inside a `skopos-{version}-{target}/`
+        // directory (see `.github/workflows/release.yml`). Without this,
+        // `self_update` looks for the binary at the archive root and fails.
+        .bin_path_in_archive("skopos-{{ version }}-{{ target }}/{{ bin }}")
+        // Each release uploads both the `.tar.gz` and a `.sha256` sidecar; both
+        // contain the target triple in their name. `.identifier` picks the
+        // tarball deterministically instead of relying on asset order.
+        .identifier(".tar.gz")
         .show_download_progress(true)
         .show_output(false)
         .current_version(current)

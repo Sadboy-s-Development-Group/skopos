@@ -60,9 +60,12 @@ jobs:
           cp "target/${{ matrix.target }}/release/skopos" "dist/${stage}/"
           cp README.md LICENSE "dist/${stage}/" 2>/dev/null || true
           tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
-          sha256sum "dist/${stage}.tar.gz" > "dist/${stage}.tar.gz.sha256"
+          # Checksum filename intentionally drops `.tar.gz` so it doesn't
+          # collide with the tarball when `skopos update` matches assets by
+          # substring — see `bin_path_in_archive`/`identifier` in update.rs.
+          sha256sum "dist/${stage}.tar.gz" > "dist/${stage}.sha256"
           echo "asset=dist/${stage}.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "checksum=dist/${stage}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${stage}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2

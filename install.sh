@@ -63,7 +63,7 @@ fi
 version="${tag#v}"
 
 asset="skopos-${version}-${target}.tar.gz"
-checksum="${asset}.sha256"
+checksum="skopos-${version}-${target}.sha256"
 base="https://github.com/$REPO/releases/download/${tag}"
 
 log "Downloading ${asset}…"
