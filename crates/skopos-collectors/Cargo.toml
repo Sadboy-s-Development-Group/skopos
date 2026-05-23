@@ -9,5 +9,6 @@ repository.workspace = true
 anyhow.workspace = true
 async-trait = "0.1"
 chrono.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json.workspace = true
 skopos-core.workspace = true

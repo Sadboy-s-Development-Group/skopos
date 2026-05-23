@@ -178,6 +178,7 @@ pub(crate) async fn usage_by_model_report_filtered(
         Some("anthropic") => "Claude usage by model",
         Some("openai") => "Codex usage by model",
         Some("google") => "Gemini usage by model",
+        Some("hermes") => "Hermes usage by model",
         _ => "Usage by model",
     };
     report.push_str(&purple_bold(heading));
@@ -187,6 +188,7 @@ pub(crate) async fn usage_by_model_report_filtered(
         let hint = match provider {
             Some("openai") => "  No Codex usage imported yet — run: skopos codex import\n",
             Some("google") => "  No Gemini usage imported yet — run: skopos gemini import\n",
+            Some("hermes") => "  No Hermes usage imported yet — run: skopos hermes import\n",
             _ => "  No usage imported yet — run: skopos claude import\n",
         };
         report.push_str(&dim(hint));
@@ -256,6 +258,7 @@ pub(crate) async fn usage_period_report_filtered(
         Some("anthropic") => format!("Claude usage {label}"),
         Some("openai") => format!("Codex usage {label}"),
         Some("google") => format!("Gemini usage {label}"),
+        Some("hermes") => format!("Hermes usage {label}"),
         _ => format!("Usage {label}"),
     };
     let mut report = String::new();

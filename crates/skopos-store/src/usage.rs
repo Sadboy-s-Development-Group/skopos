@@ -12,6 +12,26 @@ pub struct InsertUsageResult {
     pub inserted: bool,
 }
 
+/// Outcome of [`SkoposStore::upsert_usage_event_by_dedupe_key`].
+///
+/// `Inserted` — the dedupe key was new, a fresh row landed.
+/// `Updated` — the dedupe key existed and the new totals were strictly
+///     larger, so the token/cost/metadata columns were refreshed in
+///     place. Identity columns (`id`, `dedupe_key`, `timestamp`,
+///     `provider`, `model`, source, project_path, session_id,
+///     request_id) are never touched on conflict.
+/// `Unchanged` — the dedupe key existed but the incoming `total_tokens`
+///     was not strictly greater than what is already stored, so the
+///     monotonic guard kept the existing row. This is the expected
+///     outcome when re-importing a session that has not produced new
+///     tokens since the last import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    Inserted,
+    Updated,
+    Unchanged,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageModelTotal {
     pub provider: String,
@@ -96,6 +116,118 @@ impl SkoposStore {
 
         Ok(InsertUsageResult {
             inserted: result.rows_affected() == 1,
+        })
+    }
+
+    /// Insert `event` keyed on `dedupe_key`, or update the existing row
+    /// in place if the incoming `total_tokens` is strictly greater than
+    /// what is stored. The monotonic guard makes this safe to call from
+    /// agents whose source data mutates between snapshots — notably
+    /// Hermes, where a single `sessions` row is rewritten in place while
+    /// a session is alive. Tokens never go down within one session, so
+    /// "only grow" is the right semantics; an unexpected smaller read
+    /// (corrupt source, partial write) is silently ignored.
+    ///
+    /// Identity columns (`id`, `dedupe_key`, `timestamp`, `provider`,
+    /// `model`, source, project, session/request id) are NOT touched on
+    /// conflict — `timestamp` is the session start and must stay stable
+    /// across updates so timestamp-range rollups (`today`, `week`,
+    /// `month`) keep classifying the event under the period it began in.
+    pub async fn upsert_usage_event_by_dedupe_key(
+        &self,
+        event: &UsageEvent,
+        dedupe_key: &str,
+    ) -> anyhow::Result<UpsertOutcome> {
+        let metadata_json = serde_json::to_string(&event.metadata)?;
+        let project_path = event
+            .project_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string());
+        let (estimated_cost_usd, currency) = event
+            .estimated_cost
+            .as_ref()
+            .map(|money| (Some(money.amount), money.currency.as_str()))
+            .unwrap_or((None, "USD"));
+
+        // A single transaction so the existence probe and the upsert see
+        // the same snapshot — without it, a concurrent writer could turn
+        // a Some/0 result into a phantom Inserted outcome.
+        let mut tx = self.pool.begin().await?;
+
+        let existed: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM usage_events WHERE dedupe_key = ? LIMIT 1")
+                .bind(dedupe_key)
+                .fetch_optional(&mut *tx)
+                .await?;
+
+        let result = sqlx::query(
+            r#"
+            INSERT INTO usage_events (
+                id,
+                dedupe_key,
+                timestamp,
+                provider,
+                model,
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+                reasoning_tokens,
+                total_tokens,
+                estimated_cost_usd,
+                currency,
+                source_app,
+                source_type,
+                project_path,
+                session_id,
+                request_id,
+                metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(dedupe_key) DO UPDATE SET
+                input_tokens = excluded.input_tokens,
+                output_tokens = excluded.output_tokens,
+                cached_input_tokens = excluded.cached_input_tokens,
+                reasoning_tokens = excluded.reasoning_tokens,
+                total_tokens = excluded.total_tokens,
+                estimated_cost_usd = excluded.estimated_cost_usd,
+                currency = excluded.currency,
+                metadata_json = excluded.metadata_json
+            WHERE excluded.total_tokens > usage_events.total_tokens
+            "#,
+        )
+        .bind(event.id.to_string())
+        .bind(dedupe_key)
+        .bind(event.timestamp.to_rfc3339())
+        .bind(&event.provider.0)
+        .bind(&event.model.0)
+        .bind(event.input_tokens as i64)
+        .bind(event.output_tokens as i64)
+        .bind(event.cached_input_tokens.map(|tokens| tokens as i64))
+        .bind(event.reasoning_tokens.map(|tokens| tokens as i64))
+        .bind(event.total_tokens as i64)
+        .bind(estimated_cost_usd)
+        .bind(currency)
+        .bind(&event.source.app)
+        .bind(source_kind_name(&event.source.kind))
+        .bind(project_path)
+        .bind(&event.session_id)
+        .bind(&event.request_id)
+        .bind(metadata_json)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(match (existed.is_some(), result.rows_affected()) {
+            (false, 1) => UpsertOutcome::Inserted,
+            (true, 1) => UpsertOutcome::Updated,
+            (true, 0) => UpsertOutcome::Unchanged,
+            // (false, 0) would mean SQLite accepted an INSERT without
+            // touching a row, which never happens for this statement.
+            (existed, n) => {
+                anyhow::bail!(
+                    "upsert returned an impossible (existed={existed}, rows_affected={n}) state"
+                );
+            }
         })
     }
 
@@ -292,6 +424,83 @@ mod tests {
         event.session_id = Some("session-1".to_string());
         event.request_id = Some(request_id.to_string());
         event
+    }
+
+    #[tokio::test]
+    async fn upsert_inserts_then_updates_then_no_ops() {
+        let store = SkoposStore::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+
+        // First call: fresh dedupe key → Inserted.
+        let mut event = usage_event_at(
+            "session-1",
+            Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap(),
+        );
+        let first = store
+            .upsert_usage_event_by_dedupe_key(&event, "hermes:session:s1")
+            .await
+            .unwrap();
+        assert_eq!(first, UpsertOutcome::Inserted);
+        assert_eq!(store.count_usage_events().await.unwrap(), 1);
+
+        // Same dedupe key, total grew → Updated, still a single row.
+        event.input_tokens = 100;
+        event.output_tokens = 200;
+        event.cached_input_tokens = Some(50);
+        event.total_tokens = 350;
+        let second = store
+            .upsert_usage_event_by_dedupe_key(&event, "hermes:session:s1")
+            .await
+            .unwrap();
+        assert_eq!(second, UpsertOutcome::Updated);
+        assert_eq!(store.count_usage_events().await.unwrap(), 1);
+
+        // Same totals re-imported → Unchanged (the `>` guard blocks).
+        let third = store
+            .upsert_usage_event_by_dedupe_key(&event, "hermes:session:s1")
+            .await
+            .unwrap();
+        assert_eq!(third, UpsertOutcome::Unchanged);
+
+        // Verify the stored row reflects the larger numbers.
+        let totals = store.usage_totals_by_model().await.unwrap();
+        assert_eq!(totals.len(), 1);
+        assert_eq!(totals[0].input_tokens, 100);
+        assert_eq!(totals[0].output_tokens, 200);
+        assert_eq!(totals[0].cached_input_tokens, 50);
+        assert_eq!(totals[0].total_tokens, 350);
+    }
+
+    #[tokio::test]
+    async fn upsert_with_smaller_total_does_not_clobber() {
+        let store = SkoposStore::connect("sqlite::memory:").await.unwrap();
+        store.migrate().await.unwrap();
+
+        // Seed a row with large totals.
+        let mut big = usage_event("session-big");
+        big.input_tokens = 1_000;
+        big.output_tokens = 2_000;
+        big.total_tokens = 3_000;
+        let outcome = store
+            .upsert_usage_event_by_dedupe_key(&big, "hermes:session:big")
+            .await
+            .unwrap();
+        assert_eq!(outcome, UpsertOutcome::Inserted);
+
+        // Now try to upsert the same key with smaller totals (e.g.
+        // accidental partial read). The monotonic guard must protect us.
+        let mut small = big.clone();
+        small.input_tokens = 10;
+        small.output_tokens = 20;
+        small.total_tokens = 30;
+        let outcome = store
+            .upsert_usage_event_by_dedupe_key(&small, "hermes:session:big")
+            .await
+            .unwrap();
+        assert_eq!(outcome, UpsertOutcome::Unchanged);
+
+        let totals = store.usage_totals_by_model().await.unwrap();
+        assert_eq!(totals[0].total_tokens, 3_000, "big row must survive");
     }
 
     #[tokio::test]

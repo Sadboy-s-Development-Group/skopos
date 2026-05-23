@@ -1,8 +1,8 @@
 //! The `skopos` command-line surface — every `clap` type in one place.
 //!
-//! `claude` and `gemini` share [`AgentCommand`] because their subcommand
-//! sets are identical; `codex` keeps its own [`CodexCommand`] only
-//! because it carries the extra `usage` / `refresh` commands.
+//! `claude`, `gemini` and `hermes` share [`AgentCommand`] because their
+//! subcommand sets are identical; `codex` keeps its own [`CodexCommand`]
+//! only because it carries the extra `usage` / `refresh` commands.
 
 use std::path::PathBuf;
 
@@ -48,6 +48,11 @@ pub(crate) enum Command {
     },
     /// Inspect or import Gemini CLI local usage logs.
     Gemini {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
+    /// Inspect or import Hermes agent local usage logs.
+    Hermes {
         #[command(subcommand)]
         command: AgentCommand,
     },
@@ -139,7 +144,7 @@ pub(crate) enum UsageCommand {
     },
 }
 
-/// Subcommands shared by `skopos claude` and `skopos gemini`.
+/// Subcommands shared by `skopos claude`, `skopos gemini` and `skopos hermes`.
 #[derive(Debug, Subcommand)]
 pub(crate) enum AgentCommand {
     /// Scan the agent's local transcripts and summarize token usage

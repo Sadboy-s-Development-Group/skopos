@@ -6,7 +6,7 @@ mod network;
 mod usage;
 
 pub use network::{NetworkOutage, NetworkSample, NetworkStatusCounts};
-pub use usage::{InsertUsageResult, UsageModelTotal, UsageTotals};
+pub use usage::{InsertUsageResult, UpsertOutcome, UsageModelTotal, UsageTotals};
 
 #[derive(Clone)]
 pub struct SkoposStore {

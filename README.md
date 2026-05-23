@@ -42,7 +42,7 @@ laptop.
 - [Features](#features)
   - [Launchpad — `skopos work`](#-launchpad--skopos-work)
   - [AI observability — `skopos usage`](#-ai-observability--skopos-usage)
-  - [Spend tracking — `skopos claude·codex·gemini`](#-spend-tracking--skopos-claude--codex--gemini)
+  - [Spend tracking — `skopos claude·codex·gemini·hermes`](#-spend-tracking--skopos-claude--codex--gemini--hermes)
   - [Network tracker — `skopos network`](#-network-tracker--skopos-network)
   - [The interactive shell](#-the-interactive-shell)
 - [Install](#install)
@@ -80,7 +80,7 @@ Skopos is the **single pane of glass** for all of it — a polished TUI that is:
 
 Stop `cd`-ing around. `skopos work` lists the projects under your code
 directory, detects each one's language, and hands the terminal straight to the
-agentic CLI you pick — Claude, Codex, Gemini or opencode.
+agentic CLI you pick — Claude, Codex, Gemini, Hermes or opencode.
 
 ```
   claude  ~/Coding
@@ -122,7 +122,7 @@ session, and recent local activity — with brand-coloured progress bars.
 > reads it the supported way — a `statusLine` hook you install once with
 > `skopos usage install`.
 
-### ▸ Spend tracking — `skopos claude` · `codex` · `gemini`
+### ▸ Spend tracking — `skopos claude` · `codex` · `gemini` · `hermes`
 
 Import the local logs every agentic CLI already writes, and Skopos accounts
 for them: tokens by period, by model, and an estimated dollar cost from a
@@ -141,7 +141,7 @@ built-in (and overridable) price catalog.
 ```
 
 Per-period (`-t` today · `-w` week · `-m` month) and per-model views for
-Claude Code, Codex and Gemini CLI — all from logs already on disk.
+Claude Code, Codex, Gemini and Hermes — all from logs already on disk.
 
 ### ▸ Network tracker — `skopos network`
 
@@ -245,9 +245,9 @@ skopos network               # open the network dashboard
 | `skopos usage` | 5h / weekly limit bars, live session, local activity. |
 | `skopos usage install` / `uninstall` | Manage the Claude Code statusline hook. |
 | `skopos providers` | Providers tracked in the local store. |
-| `skopos claude·codex·gemini import` | Import that tool's local usage logs. |
-| `skopos claude·codex·gemini -t/-w/-m` | Usage today / this week / this month. |
-| `skopos claude·codex·gemini models` | Usage grouped by model. |
+| `skopos claude·codex·gemini·hermes import` | Import that tool's local usage logs. |
+| `skopos claude·codex·gemini·hermes -t/-w/-m` | Usage today / this week / this month. |
+| `skopos claude·codex·gemini·hermes models` | Usage grouped by model. |
 | `skopos codex usage` / `refresh` | Codex 5h / weekly limits from the app-server. |
 
 </details>

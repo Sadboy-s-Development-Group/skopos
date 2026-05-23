@@ -157,6 +157,43 @@ fn default_prices() -> Vec<ModelPrice> {
             output_per_million: 3.0,
             cached_input_per_million: Some(0.05),
         },
+        // Hermes-routed traffic. Hermes is multi-billing-route (openai-codex,
+        // copilot, direct API…) and the effective price the user pays depends
+        // on which subscription was active. The defaults below mirror the
+        // native API pricing of each underlying model so `est cost` stops
+        // reading $0 — users on flat-fee routes (e.g. Copilot) should override
+        // these entries in ~/.config/skopos/pricing.toml.
+        ModelPrice {
+            provider: "hermes".to_string(),
+            model: "gpt-5.5".to_string(),
+            input_per_million: 5.0,
+            output_per_million: 30.0,
+            cached_input_per_million: Some(0.50),
+        },
+        ModelPrice {
+            provider: "hermes".to_string(),
+            model: "claude-haiku-4.5".to_string(),
+            input_per_million: 1.0,
+            output_per_million: 5.0,
+            cached_input_per_million: Some(0.10),
+        },
+        ModelPrice {
+            provider: "hermes".to_string(),
+            model: "gemini-3-flash-preview".to_string(),
+            input_per_million: 0.50,
+            output_per_million: 3.0,
+            cached_input_per_million: Some(0.05),
+        },
+        // No native Gemini 3.1 Pro entry yet; this estimate tracks Google's
+        // published Gemini Pro tier (~2.5× Flash). Override locally once
+        // Google publishes the final 3.1 Pro pricing.
+        ModelPrice {
+            provider: "hermes".to_string(),
+            model: "gemini-3.1-pro-preview".to_string(),
+            input_per_million: 1.25,
+            output_per_million: 5.0,
+            cached_input_per_million: Some(0.125),
+        },
     ]
 }
 
@@ -189,6 +226,13 @@ mod tests {
             .is_some());
         assert!(catalog.price("openai", "gpt-5.5").is_some());
         assert!(catalog.price("google", "gemini-3-flash-preview").is_some());
+        // Hermes routes — model names differ slightly from the native
+        // catalog (e.g. claude-haiku-4.5 vs claude-haiku-4-5-20251001),
+        // so they need their own entries even though the prices match.
+        assert!(catalog.price("hermes", "gpt-5.5").is_some());
+        assert!(catalog.price("hermes", "claude-haiku-4.5").is_some());
+        assert!(catalog.price("hermes", "gemini-3-flash-preview").is_some());
+        assert!(catalog.price("hermes", "gemini-3.1-pro-preview").is_some());
         assert!(catalog.price("openai", "ghost-model-9000").is_none());
     }
 

@@ -1,18 +1,19 @@
 //! The agentic CLIs Skopos imports token logs from.
 //!
-//! Claude Code, Codex and Gemini each store their transcripts in a
-//! different place, in a different shape, and need a different stable
-//! dedupe key. [`Agent`] is the one place that knowledge lives; the
-//! scan / import / auto-import orchestration below is written once and
-//! dispatched over the enum, instead of being copy-pasted per provider.
+//! Claude Code, Codex, Gemini and Hermes each store their transcripts
+//! in a different place, in a different shape, and need a different
+//! stable dedupe key. [`Agent`] is the one place that knowledge lives;
+//! the scan / import / auto-import orchestration below is written once
+//! and dispatched over the enum, instead of being copy-pasted per
+//! provider.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use skopos_collectors::{claude_code, codex, gemini};
+use skopos_collectors::{claude_code, codex, gemini, hermes};
 use skopos_core::UsageEvent;
-use skopos_store::SkoposStore;
+use skopos_store::{SkoposStore, UpsertOutcome};
 
 use crate::limits::home_dir;
 use crate::theme::dim;
@@ -23,6 +24,37 @@ pub(crate) enum Agent {
     Claude,
     Codex,
     Gemini,
+    Hermes,
+}
+
+/// How the import loop should reconcile a parsed event with whatever
+/// is already in the store under the same dedupe key.
+///
+/// `InsertOnce` — Claude Code, Codex and Gemini all write *append-only*
+///     transcripts: once a log line exists, its token counts never
+///     change. Re-importing the same line should be a no-op (the
+///     `INSERT OR IGNORE` path).
+/// `UpsertByDedupeKey` — Hermes rewrites a single session row in place
+///     while the session is alive, so the same dedupe key may legally
+///     come back with larger totals. The store's monotonic upsert
+///     guarantees we only ever grow, never shrink.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InsertStrategy {
+    InsertOnce,
+    UpsertByDedupeKey,
+}
+
+/// How [`try_auto_import`] decides "is there new agent activity since
+/// the last imported event?". The shape is per-agent because different
+/// CLIs store their logs in fundamentally different layouts: a tree of
+/// JSONL files (Codex, Gemini) or a single SQLite database (Hermes).
+enum StalenessSignal {
+    /// Agent is never auto-imported; only on explicit `skopos <agent> import`.
+    None,
+    /// Walk `<root>/**/*.jsonl` and trip if any file's mtime > threshold.
+    JsonlTree(PathBuf),
+    /// Trip if this single file's mtime > threshold.
+    SingleFile(PathBuf),
 }
 
 impl Agent {
@@ -33,6 +65,7 @@ impl Agent {
             "anthropic" => Some(Agent::Claude),
             "openai" => Some(Agent::Codex),
             "google" => Some(Agent::Gemini),
+            "hermes" => Some(Agent::Hermes),
             _ => None,
         }
     }
@@ -43,6 +76,7 @@ impl Agent {
             Agent::Claude => "anthropic",
             Agent::Codex => "openai",
             Agent::Gemini => "google",
+            Agent::Hermes => hermes::HERMES_PROVIDER,
         }
     }
 
@@ -52,6 +86,7 @@ impl Agent {
             Agent::Claude => "claude",
             Agent::Codex => "codex",
             Agent::Gemini => "gemini",
+            Agent::Hermes => "hermes",
         }
     }
 
@@ -61,6 +96,7 @@ impl Agent {
             Agent::Claude => "Claude Code scan",
             Agent::Codex => "Codex scan",
             Agent::Gemini => "Gemini scan",
+            Agent::Hermes => "Hermes scan",
         }
     }
 
@@ -70,6 +106,7 @@ impl Agent {
             Agent::Claude => "Claude Code import",
             Agent::Codex => "Codex import",
             Agent::Gemini => "Gemini import",
+            Agent::Hermes => "Hermes import",
         }
     }
 
@@ -79,17 +116,29 @@ impl Agent {
             Agent::Claude => ".claude",
             Agent::Codex => ".codex",
             Agent::Gemini => ".gemini",
+            Agent::Hermes => ".hermes",
         };
         home_dir().join(dir)
     }
 
-    /// Subdirectory whose JSONL mtimes signal a fresh import is worthwhile.
-    /// `None` for agents that are only ever imported on explicit request.
-    fn staleness_root(self, home: &Path) -> Option<PathBuf> {
+    /// What [`try_auto_import`] should look at to decide whether the
+    /// agent has fresh activity since the last stored event.
+    fn staleness_signal(self, home: &Path) -> StalenessSignal {
         match self {
-            Agent::Claude => None,
-            Agent::Codex => Some(home.join("sessions")),
-            Agent::Gemini => Some(home.join("tmp")),
+            Agent::Claude => StalenessSignal::None,
+            Agent::Codex => StalenessSignal::JsonlTree(home.join("sessions")),
+            Agent::Gemini => StalenessSignal::JsonlTree(home.join("tmp")),
+            Agent::Hermes => StalenessSignal::SingleFile(home.join("state.db")),
+        }
+    }
+
+    /// How the import loop should treat repeated dedupe keys. Hermes
+    /// needs upsert because its session rows mutate in place; every
+    /// other agent's logs are append-only and insert-once is correct.
+    fn insert_strategy(self) -> InsertStrategy {
+        match self {
+            Agent::Claude | Agent::Codex | Agent::Gemini => InsertStrategy::InsertOnce,
+            Agent::Hermes => InsertStrategy::UpsertByDedupeKey,
         }
     }
 
@@ -99,6 +148,7 @@ impl Agent {
             Agent::Claude => claude_code::discover_claude_code_jsonl_paths(home),
             Agent::Codex => codex::discover_codex_rollout_paths(home),
             Agent::Gemini => gemini::discover_gemini_session_paths(home),
+            Agent::Hermes => hermes::discover_hermes_state_db_paths(home),
         }
     }
 
@@ -108,6 +158,7 @@ impl Agent {
             Agent::Claude => claude_code::parse_usage_events_from_jsonl_path(path),
             Agent::Codex => codex::parse_usage_events_from_rollout_path(path),
             Agent::Gemini => gemini::parse_usage_events_from_session_path(path),
+            Agent::Hermes => hermes::parse_usage_events_from_hermes_db(path),
         }
     }
 
@@ -117,16 +168,27 @@ impl Agent {
             Agent::Claude => claude_dedupe_key(event),
             Agent::Codex => codex_dedupe_key(event),
             Agent::Gemini => gemini_dedupe_key(event),
+            Agent::Hermes => hermes_dedupe_key(event),
         }
     }
 }
 
 /// Outcome of importing one agent's logs into the store.
+///
+/// `inserted_events` — brand-new dedupe keys that produced fresh rows.
+/// `updated_events` — Hermes-style: a row was already in the store and
+///     its tokens were refreshed in place because the source grew. Stays
+///     `0` for append-only agents.
+/// `duplicate_events` — the dedupe key already existed and nothing
+///     changed (for [`InsertStrategy::InsertOnce`] this means an exact
+///     re-import; for [`InsertStrategy::UpsertByDedupeKey`] it means the
+///     source has not grown since the last import).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ImportReport {
     pub files: u64,
     pub seen_events: u64,
     pub inserted_events: u64,
+    pub updated_events: u64,
     pub duplicate_events: u64,
 }
 
@@ -209,14 +271,26 @@ pub(crate) async fn import_from_home(
         ..Default::default()
     };
 
+    let strategy = agent.insert_strategy();
     for path in paths {
         for event in agent.parse(&path)? {
             report.seen_events += 1;
             let key = agent.dedupe_key(&event);
-            if store.insert_usage_event_once(&event, &key).await?.inserted {
-                report.inserted_events += 1;
-            } else {
-                report.duplicate_events += 1;
+            match strategy {
+                InsertStrategy::InsertOnce => {
+                    if store.insert_usage_event_once(&event, &key).await?.inserted {
+                        report.inserted_events += 1;
+                    } else {
+                        report.duplicate_events += 1;
+                    }
+                }
+                InsertStrategy::UpsertByDedupeKey => {
+                    match store.upsert_usage_event_by_dedupe_key(&event, &key).await? {
+                        UpsertOutcome::Inserted => report.inserted_events += 1,
+                        UpsertOutcome::Updated => report.updated_events += 1,
+                        UpsertOutcome::Unchanged => report.duplicate_events += 1,
+                    }
+                }
             }
         }
     }
@@ -244,6 +318,7 @@ pub(crate) async fn import_report(
          files:      {files}\n\
          seen:       {seen}\n\
          inserted:   {inserted}\n\
+         updated:    {updated}\n\
          duplicates: {duplicates}\n",
         home.display(),
         db_path.display(),
@@ -251,12 +326,13 @@ pub(crate) async fn import_report(
         files = r.files,
         seen = r.seen_events,
         inserted = r.inserted_events,
+        updated = r.updated_events,
         duplicates = r.duplicate_events,
     ))
 }
 
-/// Idempotent best-effort import: if the agent's log directory holds
-/// JSONL files newer than the latest event stored for it, run a full
+/// Idempotent best-effort import: if the agent's local logs hold
+/// activity newer than the latest event stored for it, run a full
 /// import. The dedupe keys make a full sweep safe.
 ///
 /// All errors are swallowed — this hook must never break the report that
@@ -274,10 +350,8 @@ async fn try_auto_import(agent: Agent, db_path: &Path) -> anyhow::Result<()> {
     use anyhow::Context;
 
     let home = agent.default_home();
-    let Some(root) = agent.staleness_root(&home) else {
-        return Ok(());
-    };
-    if !root.exists() {
+    let signal = agent.staleness_signal(&home);
+    if matches!(signal, StalenessSignal::None) {
         return Ok(());
     }
 
@@ -291,7 +365,22 @@ async fn try_auto_import(agent: Agent, db_path: &Path) -> anyhow::Result<()> {
         .with_context(|| format!("read latest {} timestamp", agent.provider()))?;
     drop(store);
 
-    if !jsonls_newer_than(&root, last)? {
+    let is_stale = match signal {
+        StalenessSignal::None => return Ok(()),
+        StalenessSignal::JsonlTree(root) => {
+            if !root.exists() {
+                return Ok(());
+            }
+            jsonls_newer_than(&root, last)?
+        }
+        StalenessSignal::SingleFile(path) => {
+            if !path.exists() {
+                return Ok(());
+            }
+            file_newer_than(&path, last)?
+        }
+    };
+    if !is_stale {
         return Ok(());
     }
 
@@ -306,11 +395,7 @@ fn jsonls_newer_than(
     sessions_root: &Path,
     threshold: Option<DateTime<Utc>>,
 ) -> anyhow::Result<bool> {
-    use std::time::SystemTime;
-    let threshold_st = threshold.map(|t| {
-        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(t.timestamp().max(0) as u64)
-    });
-
+    let threshold_st = threshold.map(systemtime_at_epoch);
     for entry in walkdir_jsonl(sessions_root)? {
         let mtime = std::fs::metadata(&entry)?.modified()?;
         match threshold_st {
@@ -320,6 +405,21 @@ fn jsonls_newer_than(
         }
     }
     Ok(false)
+}
+
+/// Return `Ok(true)` if `path`'s mtime is strictly newer than `threshold`,
+/// or if `threshold` is `None` (first-time import). Hermes uses this to
+/// gate on its single `state.db`.
+fn file_newer_than(path: &Path, threshold: Option<DateTime<Utc>>) -> anyhow::Result<bool> {
+    let mtime = std::fs::metadata(path)?.modified()?;
+    Ok(match threshold {
+        None => true,
+        Some(t) => mtime > systemtime_at_epoch(t),
+    })
+}
+
+fn systemtime_at_epoch(t: DateTime<Utc>) -> std::time::SystemTime {
+    std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(t.timestamp().max(0) as u64)
 }
 
 fn walkdir_jsonl(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
@@ -409,6 +509,22 @@ fn gemini_dedupe_key(event: &UsageEvent) -> String {
     }
 }
 
+/// Hermes stores one row per session that we only import once `ended_at`
+/// is set — so the session id alone is a stable, final key.
+fn hermes_dedupe_key(event: &UsageEvent) -> String {
+    match &event.session_id {
+        Some(session) => format!("hermes:session:{session}"),
+        None => format!(
+            "hermes:fallback:{}:{}:{}:{}:{}",
+            event.timestamp.to_rfc3339(),
+            event.model.0,
+            event.input_tokens,
+            event.cached_input_tokens.unwrap_or(0),
+            event.output_tokens,
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,5 +576,70 @@ mod tests {
         assert!(jsonls_newer_than(&sessions, Some(older_threshold)).unwrap());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn file_newer_than_handles_threshold_and_pinned_mtime() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::time::{Duration, SystemTime};
+
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "skopos-cli-file-newer-test-{}-{}",
+            std::process::id(),
+            unique,
+        ));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let target = temp_dir.join("state.db");
+        std::fs::write(&target, b"\x00").unwrap();
+        let pinned = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&target)
+            .unwrap()
+            .set_modified(pinned)
+            .unwrap();
+
+        // No threshold (first-time import) → always true.
+        assert!(file_newer_than(&target, None).unwrap());
+
+        // Threshold strictly newer than the file → false.
+        let newer = Utc.timestamp_opt(1_700_000_000 + 60, 0).unwrap();
+        assert!(!file_newer_than(&target, Some(newer)).unwrap());
+
+        // Threshold strictly older than the file → true.
+        let older = Utc.timestamp_opt(1_700_000_000 - 60, 0).unwrap();
+        assert!(file_newer_than(&target, Some(older)).unwrap());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn hermes_dedupe_key_uses_session_id() {
+        let mut event = UsageEvent::new(
+            skopos_core::ProviderId::new("hermes"),
+            skopos_core::ModelId::new("gpt-5.5"),
+            10,
+            20,
+            skopos_core::UsageSource {
+                app: "hermes".into(),
+                kind: skopos_core::UsageSourceKind::Log,
+            },
+        );
+        event.session_id = Some("20260520_181742_d9b5f5".into());
+        assert_eq!(
+            hermes_dedupe_key(&event),
+            "hermes:session:20260520_181742_d9b5f5"
+        );
+
+        // Without session_id, falls back to a stable tuple. The format
+        // is implementation-detail; we just check it does not panic and
+        // depends on the model name.
+        event.session_id = None;
+        assert!(hermes_dedupe_key(&event).contains("hermes:fallback:"));
+        assert!(hermes_dedupe_key(&event).contains("gpt-5.5"));
     }
 }

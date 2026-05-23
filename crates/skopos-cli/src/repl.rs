@@ -180,6 +180,7 @@ fn parse_command(input: &str) -> Command {
         ["claude", rest @ ..] => parse_period_args("claude", rest, Some("anthropic")),
         ["codex", rest @ ..] => parse_period_args("codex", rest, Some("openai")),
         ["gemini", rest @ ..] => parse_period_args("gemini", rest, Some("google")),
+        ["hermes", rest @ ..] => parse_period_args("hermes", rest, Some("hermes")),
         _ => Command::Unknown(input.to_string()),
     }
 }
@@ -220,10 +221,15 @@ fn help_text() -> String {
         ("gemini -w", "Gemini usage this week (token totals)"),
         ("gemini -m", "Gemini usage this month (token totals)"),
         ("gemini models", "Gemini usage grouped by model"),
+        ("hermes -t", "Hermes usage today (token totals)"),
+        ("hermes -w", "Hermes usage this week (token totals)"),
+        ("hermes -m", "Hermes usage this month (token totals)"),
+        ("hermes models", "Hermes usage grouped by model"),
         ("providers", "list tracked providers"),
         ("claude import", "import Claude Code logs into SQLite"),
         ("codex import", "import Codex rollout JSONLs into SQLite"),
         ("gemini import", "import Gemini session JSONLs into SQLite"),
+        ("hermes import", "import Hermes state.db into SQLite"),
         ("clear", "clear the screen and redraw the splash"),
         ("help", "show this help"),
         ("exit / quit", "leave skopos"),
@@ -528,6 +534,30 @@ mod tests {
         assert!(matches!(
             parse_command("codex models"),
             Command::Models(Some(ref p)) if p == "openai"
+        ));
+    }
+
+    #[test]
+    fn parses_hermes_period_aliases() {
+        assert!(matches!(
+            parse_command("hermes -t"),
+            Command::Period(UsagePeriod::Today, Some(ref p)) if p == "hermes"
+        ));
+        assert!(matches!(
+            parse_command("hermes -w"),
+            Command::Period(UsagePeriod::Week, Some(ref p)) if p == "hermes"
+        ));
+        assert!(matches!(
+            parse_command("hermes -m"),
+            Command::Period(UsagePeriod::Month, Some(ref p)) if p == "hermes"
+        ));
+        assert!(matches!(
+            parse_command("hermes models"),
+            Command::Models(Some(ref p)) if p == "hermes"
+        ));
+        assert!(matches!(
+            parse_command("hermes import"),
+            Command::Import(ref p) if p == "hermes"
         ));
     }
 

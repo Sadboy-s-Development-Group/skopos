@@ -49,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Usage { command }) => run_usage_command(command).await?,
         Some(Command::Claude { command }) => run_agent_command(Agent::Claude, command).await?,
         Some(Command::Gemini { command }) => run_agent_command(Agent::Gemini, command).await?,
+        Some(Command::Hermes { command }) => run_agent_command(Agent::Hermes, command).await?,
         Some(Command::Codex { command }) => run_codex_command(command).await?,
         Some(Command::Work { provider, root }) => {
             let cfg = config::load()?;
@@ -167,12 +168,13 @@ async fn agent_period_report(
 }
 
 /// Resolve the store path for an aggregate `usage` report, first pulling
-/// in any fresh Codex/Gemini logs so the totals are not stale. Claude is
-/// imported explicitly and has nothing to refresh here.
+/// in any fresh Codex / Gemini / Hermes logs so the totals are not stale.
+/// Claude is imported explicitly and has nothing to refresh here.
 async fn refresh_and_resolve_db(db: Option<PathBuf>) -> PathBuf {
     let db_path = db.unwrap_or_else(default_db_path);
     auto_import_if_stale(Agent::Codex, &db_path).await;
     auto_import_if_stale(Agent::Gemini, &db_path).await;
+    auto_import_if_stale(Agent::Hermes, &db_path).await;
     db_path
 }
 
