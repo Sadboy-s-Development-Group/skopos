@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Skopos desktop UI (Tauri v2)."
+publish = false
 
 # Tauri's mobile entry point requires the app logic to live in a lib so the
 # same `run()` can be invoked from both the desktop binary and mobile targets.

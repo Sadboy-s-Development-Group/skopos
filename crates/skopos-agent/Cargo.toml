@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Background agent daemon for the Skopos workspace."
 
 [dependencies]
 anyhow.workspace = true

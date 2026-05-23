@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Core domain types shared across the Skopos workspace."
 
 [dependencies]
 chrono.workspace = true

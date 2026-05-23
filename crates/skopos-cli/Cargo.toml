@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Skopos — the unified workspace for developers: project launchpad, AI usage tracking across providers, and a local network monitor."
+keywords = ["cli", "tui", "ai", "claude", "observability"]
+categories = ["command-line-utilities"]
+readme = "../../README.md"
 
 [[bin]]
 name = "skopos"

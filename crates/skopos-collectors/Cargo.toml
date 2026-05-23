@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Provider-specific collectors that ingest AI usage events for Skopos (Claude Code, Codex, Gemini, Hermes)."
 
 [dependencies]
 anyhow.workspace = true
