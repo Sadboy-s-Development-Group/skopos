@@ -53,6 +53,7 @@ laptop.
 - [Desktop app](#desktop-app)
 - [Development](#development)
 - [Privacy](#privacy)
+- [About this project](#about-this-project)
 - [Credits](#credits)
 - [License](#license)
 
@@ -364,6 +365,15 @@ counts, models, timestamps, cost estimates — and **never** prompts, completion
 or any conversation content. There is no telemetry and no network upload; the
 only outbound traffic is the connectivity probe pinging public hosts, and only
 when you run it.
+
+## About this project
+
+Skopos is a **personal and educational project** built to explore how AI
+providers (Anthropic, OpenAI, Google, Hermes) surface token usage and
+rate-limit data, and how that data can be unified into a single
+observability layer that lives entirely on the developer's machine. It
+is not a commercial product — expect rough edges, breaking changes, and
+the occasional opinion baked into a default.
 
 ## Credits
 
