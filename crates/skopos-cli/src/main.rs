@@ -16,6 +16,7 @@ mod repl;
 mod report;
 mod splash;
 mod statusline;
+mod term_style;
 mod theme;
 mod update;
 mod work;
@@ -85,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
             let out = tokio::task::spawn_blocking(move || update::run(check)).await??;
             print!("{out}");
         }
+        Some(Command::TermStyle { profile }) => term_style::run(profile)?,
     }
 
     Ok(())
