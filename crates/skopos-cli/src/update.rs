@@ -42,9 +42,20 @@ pub(crate) fn run(check_only: bool) -> anyhow::Result<String> {
     writeln!(out, "  target:  {target}")?;
     writeln!(out)?;
 
-    let release = self_update::backends::github::ReleaseList::configure()
-        .repo_owner(REPO_OWNER)
-        .repo_name(REPO_NAME)
+    // While the repo is private, GitHub's anonymous `/releases` returns
+    // 404; pulling a token out of the environment lets users on the
+    // private beta hit the same code path that public users will use
+    // once the repo flips. Empty token is treated as no token.
+    let auth_token = std::env::var("GITHUB_TOKEN")
+        .ok()
+        .filter(|token| !token.trim().is_empty());
+
+    let mut release_list = self_update::backends::github::ReleaseList::configure();
+    release_list.repo_owner(REPO_OWNER).repo_name(REPO_NAME);
+    if let Some(token) = auth_token.as_deref() {
+        release_list.auth_token(token);
+    }
+    let release = release_list
         .build()?
         .fetch()
         // GitHub answers `/releases` with 404 when a repo has no
@@ -85,7 +96,8 @@ pub(crate) fn run(check_only: bool) -> anyhow::Result<String> {
     writeln!(out)?;
     writeln!(out, "  downloading and replacing the binary in place…")?;
 
-    let status = self_update::backends::github::Update::configure()
+    let mut update_cfg = self_update::backends::github::Update::configure();
+    update_cfg
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
         .bin_name(BIN_NAME)
@@ -93,9 +105,11 @@ pub(crate) fn run(check_only: bool) -> anyhow::Result<String> {
         .show_output(false)
         .current_version(current)
         .target(target)
-        .no_confirm(true)
-        .build()?
-        .update()?;
+        .no_confirm(true);
+    if let Some(token) = auth_token.as_deref() {
+        update_cfg.auth_token(token);
+    }
+    let status = update_cfg.build()?.update()?;
 
     writeln!(out)?;
     writeln!(out, "  updated to v{}", status.version())?;

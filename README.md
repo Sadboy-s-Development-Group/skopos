@@ -195,18 +195,35 @@ everything below.
 
 ## Install
 
+> **Beta access** — the `D4ffi/skopos` repo is private during the
+> v0.2.0-beta cycle, so every command below that touches GitHub
+> (downloading a release, cloning, `skopos update`) needs a token with
+> read access to this repository. Export it once per shell:
+>
+> ```bash
+> export GITHUB_TOKEN=ghp_…   # or use `gh auth token` if you have gh
+> ```
+>
+> The README will drop the auth lines as soon as the repo flips public.
+
 ### Prebuilt binary (recommended)
 
-Grab the tarball for your platform from
-[GitHub Releases](https://github.com/D4ffi/skopos/releases/latest) and drop
+Grab the tarball for your platform from the
+[latest release](https://github.com/D4ffi/skopos/releases/latest) and drop
 the `skopos` binary somewhere on your `PATH`:
 
 ```bash
-curl -sSL -o skopos.tar.gz \
-  https://github.com/D4ffi/skopos/releases/latest/download/skopos-0.2.0-beta.1-x86_64-unknown-linux-gnu.tar.gz
+curl -sSL \
+  -H "Authorization: token $GITHUB_TOKEN" \
+  -H "Accept: application/octet-stream" \
+  -o skopos.tar.gz \
+  https://api.github.com/repos/D4ffi/skopos/releases/assets/<asset-id>
 tar -xzf skopos.tar.gz
 install -m 0755 skopos-*/skopos ~/.local/bin/skopos
 ```
+
+Get the asset id with
+`gh release view v0.2.0-beta.1 --json assets -q '.assets[].id'`.
 
 Linux x86_64 is the first beta target; more platforms land as the matrix
 expands.
@@ -233,6 +250,10 @@ skopos --version        # what you're running now
 `skopos update` consults the GitHub Releases feed, finds the asset that
 matches your platform, downloads it and atomically swaps the running
 binary. The same command works regardless of how you installed it.
+
+> While the repo is private, `skopos update` needs `GITHUB_TOKEN` in the
+> environment to read the release feed; export the same token you used
+> to install. Once the repo is public, the token requirement drops.
 
 ## Quick start
 
