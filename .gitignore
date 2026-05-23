@@ -6,6 +6,9 @@
 node_modules
 .DS_Store
 *.log
+
+# Per-machine Claude Code permissions cache — contains absolute local paths.
+.claude/settings.local.json
 /apps/desktop/dist
 /apps/desktop/src-tauri/target
 # Tauri-generated schemas/artifacts (regenerated on build).

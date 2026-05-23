@@ -47,10 +47,12 @@ case "$os-$arch" in
   *)              err "unsupported platform: $os $arch — build from source: cargo install skopos-cli --locked" ;;
 esac
 
-# Resolve the release tag we want to download.
+# Resolve the release tag we want to download. We hit `/releases` rather
+# than `/releases/latest` so pre-release tags (e.g. `v0.2.0-beta.1`) are
+# considered — GitHub excludes pre-releases from the `/latest` endpoint.
 if [ "${SKOPOS_VERSION:-}" = "" ]; then
   log "Resolving latest release…"
-  tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+  tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
     | head -n1)"
   [ -n "$tag" ] || err "could not resolve latest release tag"
