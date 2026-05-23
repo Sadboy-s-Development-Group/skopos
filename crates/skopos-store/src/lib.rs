@@ -41,8 +41,8 @@ impl SkoposStore {
 
     pub async fn migrate(&self) -> anyhow::Result<()> {
         const MIGRATIONS: &[&str] = &[
-            include_str!("../../../migrations/001_initial.sql"),
-            include_str!("../../../migrations/002_network.sql"),
+            include_str!("../migrations/001_initial.sql"),
+            include_str!("../migrations/002_network.sql"),
         ];
         for migration in MIGRATIONS {
             for statement in migration.split(';') {
