@@ -68,10 +68,10 @@ Skopos is the **single pane of glass** for all of it — a polished TUI that is:
 
 | | |
 |---|---|
-| ⚡ **Fast** | A single Rust binary. No Electron, no daemon you didn't ask for. |
-| 🔒 **Local-first** | Everything lives in a SQLite file on your machine. Nothing is uploaded. |
-| 🎨 **Designed** | A consistent, purple-accented interface — splash, pickers, dashboards. |
-| 🧩 **Unified** | Projects, AI usage, cost and connectivity behind one command. |
+| **Fast** | A single Rust binary. No Electron, no daemon you didn't ask for. |
+| **Local-first** | Everything lives in a SQLite file on your machine. Nothing is uploaded. |
+| **Designed** | A consistent, purple-accented interface — splash, pickers, dashboards. |
+| **Unified** | Projects, AI usage, cost and connectivity behind one command. |
 
 ---
 

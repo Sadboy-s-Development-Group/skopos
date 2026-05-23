@@ -28,3 +28,9 @@ skopos-pricing.workspace = true
 skopos-store.workspace = true
 tokio.workspace = true
 toml.workspace = true
+
+[dev-dependencies]
+# Only used by the `render_ascii_png` example, not by the `skopos` binary.
+ab_glyph = "0.2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+imageproc = { version = "0.25", default-features = false }
