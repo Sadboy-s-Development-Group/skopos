@@ -213,11 +213,13 @@ release matrix expands.
 ### From crates.io
 
 ```bash
-cargo install skopos-cli --locked
+cargo install skopos-cli --locked --version 0.2.0-beta.1
 ```
 
 Compiles from source — slower than the prebuilt tarball, but always
-available on any platform with a Rust toolchain.
+available on any platform with a Rust toolchain. The explicit
+`--version` is required while Skopos is still tagged as a pre-release
+(`-beta.N`); it drops once we cut a `0.2.0` stable.
 
 ### From source
 

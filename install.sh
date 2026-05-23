@@ -74,8 +74,13 @@ curl -fsSL -o "$tmpdir/$checksum" "$base/$checksum"
 
 if [ -n "$sha_cmd" ]; then
   log "Verifying checksum…"
-  ( cd "$tmpdir" && $sha_cmd -c "$checksum" >/dev/null ) \
-    || err "checksum verification failed for $asset"
+  # The release workflow writes the .sha256 file with a `dist/<asset>`
+  # path embedded, so `sha256sum -c` fails when we run it from /tmp.
+  # Compare hashes directly instead.
+  expected="$(awk '{print $1}' "$tmpdir/$checksum")"
+  actual="$(cd "$tmpdir" && $sha_cmd "$asset" | awk '{print $1}')"
+  [ "$expected" = "$actual" ] \
+    || err "checksum verification failed for $asset (expected $expected, got $actual)"
 else
   log "Skipping checksum verification — install sha256sum or shasum to enable it."
 fi
