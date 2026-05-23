@@ -1,0 +1,76 @@
+name: release
+
+# Triggered by pushing a tag of the form `v*` (e.g. `v0.2.0-beta.1`).
+# Builds prebuilt binaries for every supported target, packs them into
+# tarballs whose filenames embed the target triple, and uploads them as
+# assets on the GitHub Release the tag created. `skopos update` finds
+# the right asset for the running platform by matching the triple
+# against the asset name.
+on:
+  push:
+    tags:
+      - "v*"
+
+# `softprops/action-gh-release` needs `contents: write` to create or
+# update the release and upload assets to it.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        # Pinned in rust-toolchain.toml — the action just respects it.
+        # `dtolnay/rust-toolchain` picks up the file automatically.
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Keyed per target so a future macOS matrix entry doesn't
+          # invalidate the linux cache.
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --bin skopos --target ${{ matrix.target }}
+
+      - name: Strip binary
+        run: strip target/${{ matrix.target }}/release/skopos
+
+      - name: Pack tarball
+        id: pack
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          stage="skopos-${version}-${{ matrix.target }}"
+          mkdir -p "dist/${stage}"
+          cp "target/${{ matrix.target }}/release/skopos" "dist/${stage}/"
+          cp README.md LICENSE "dist/${stage}/" 2>/dev/null || true
+          tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
+          sha256sum "dist/${stage}.tar.gz" > "dist/${stage}.tar.gz.sha256"
+          echo "asset=dist/${stage}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${stage}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          # `prerelease` is auto-derived from the tag: anything with a
+          # hyphen (e.g. `v0.2.0-beta.1`) is treated as a pre-release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.pack.outputs.asset }}
+            ${{ steps.pack.outputs.checksum }}
