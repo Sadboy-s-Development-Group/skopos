@@ -17,6 +17,7 @@ mod report;
 mod splash;
 mod statusline;
 mod theme;
+mod update;
 mod work;
 
 use agent::{auto_import_if_stale, import_report, scan, Agent};
@@ -76,6 +77,14 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Command::Statusline) => run_statusline()?,
+        Some(Command::Update { check }) => {
+            // self_update wraps a *blocking* reqwest client, so calling
+            // it on the tokio main thread trips "Cannot drop a runtime
+            // in a context where blocking is not allowed". Hop onto the
+            // blocking pool, where dropping a sync HTTP runtime is fine.
+            let out = tokio::task::spawn_blocking(move || update::run(check)).await??;
+            print!("{out}");
+        }
     }
 
     Ok(())

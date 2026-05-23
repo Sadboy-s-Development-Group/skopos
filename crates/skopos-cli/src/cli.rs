@@ -13,6 +13,7 @@ use crate::providers::ProviderId;
 #[derive(Debug, Parser)]
 #[command(name = "skopos")]
 #[command(about = "Skopos CLI control plane")]
+#[command(version)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -76,6 +77,12 @@ pub(crate) enum Command {
     /// by `skopos usage install`; not meant to be invoked by hand.
     #[command(hide = true)]
     Statusline,
+    /// Replace this binary with the latest published release.
+    Update {
+        /// Only check whether a newer release exists; do not download or write anything.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
