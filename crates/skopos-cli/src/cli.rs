@@ -83,6 +83,15 @@ pub(crate) enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Switch the terminal style (fastfetch logo + colours + oh-my-posh
+    /// palette). With no argument, opens a TUI picker; with a name, applies
+    /// that profile directly.
+    #[command(alias = "change-term-style")]
+    TermStyle {
+        /// Profile name (a directory under ~/.config/fastfetch/profiles/).
+        /// If omitted, the TUI opens.
+        profile: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

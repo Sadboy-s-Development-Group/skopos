@@ -132,10 +132,7 @@ fn is_newer(candidate: &str, current: &str) -> bool {
     let normalize = |s: &str| s.trim_start_matches('v').to_string();
     let candidate = normalize(candidate);
     let current = normalize(current);
-    match (
-        semver_lite::parse(&candidate),
-        semver_lite::parse(&current),
-    ) {
+    match (semver_lite::parse(&candidate), semver_lite::parse(&current)) {
         (Some(a), Some(b)) => a > b,
         _ => candidate.as_str() > current.as_str(),
     }

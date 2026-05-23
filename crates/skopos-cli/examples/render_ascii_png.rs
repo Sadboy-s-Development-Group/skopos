@@ -65,8 +65,8 @@ fn main() -> Result<()> {
     let max_cols = lines.iter().map(|l| l.chars().count()).max().unwrap_or(1);
 
     let font_path = resolve_font()?;
-    let font_bytes = std::fs::read(&font_path)
-        .with_context(|| format!("read font {}", font_path.display()))?;
+    let font_bytes =
+        std::fs::read(&font_path).with_context(|| format!("read font {}", font_path.display()))?;
     let font = FontArc::try_from_vec(font_bytes).context("parse font")?;
 
     // Pick the largest font size where both axes of the art's bounding
@@ -163,7 +163,5 @@ fn resolve_font() -> Result<PathBuf> {
             return Ok(PathBuf::from(candidate));
         }
     }
-    anyhow::bail!(
-        "no monospace font found in known locations; set SKOPOS_PNG_FONT=<path-to-ttf>"
-    )
+    anyhow::bail!("no monospace font found in known locations; set SKOPOS_PNG_FONT=<path-to-ttf>")
 }
