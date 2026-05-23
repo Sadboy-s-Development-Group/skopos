@@ -4216,7 +4216,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "skopos-agent"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -4229,7 +4229,7 @@ dependencies = [
 
 [[package]]
 name = "skopos-cli"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -4251,7 +4251,7 @@ dependencies = [
 
 [[package]]
 name = "skopos-collectors"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "skopos-core"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "chrono",
  "serde",
@@ -4274,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "skopos-desktop"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -4284,7 +4284,7 @@ dependencies = [
 
 [[package]]
 name = "skopos-pricing"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "anyhow",
  "serde",
@@ -4294,7 +4294,7 @@ dependencies = [
 
 [[package]]
 name = "skopos-store"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "anyhow",
  "chrono",
