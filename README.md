@@ -207,7 +207,7 @@ curl -fsSL https://raw.githubusercontent.com/Sadboy-s-Development-Group/skopos/m
 
 Downloads the latest release tarball, verifies the SHA-256 checksum, and
 installs `skopos` into `~/.local/bin`. Override the target directory with
-`INSTALL_DIR=…` or pin a version with `SKOPOS_VERSION=v0.2.0-beta.3`.
+`INSTALL_DIR=…` or pin a version with `SKOPOS_VERSION=v0.2.0-beta.4`.
 
 Linux x86_64 is the first published target; more platforms land as the
 release matrix expands.
@@ -215,7 +215,7 @@ release matrix expands.
 ### From crates.io
 
 ```bash
-cargo install skopos-cli --locked --version 0.2.0-beta.3
+cargo install skopos-cli --locked --version 0.2.0-beta.4
 ```
 
 Compiles from source — slower than the prebuilt tarball, but always

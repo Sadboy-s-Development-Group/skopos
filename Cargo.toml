@@ -33,7 +33,7 @@ toml = "0.8"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 
-skopos-core = { path = "crates/skopos-core", version = "0.2.0-beta.3" }
-skopos-store = { path = "crates/skopos-store", version = "0.2.0-beta.3" }
-skopos-pricing = { path = "crates/skopos-pricing", version = "0.2.0-beta.3" }
-skopos-collectors = { path = "crates/skopos-collectors", version = "0.2.0-beta.3" }
+skopos-core = { path = "crates/skopos-core", version = "0.2.0-beta.4" }
+skopos-store = { path = "crates/skopos-store", version = "0.2.0-beta.4" }
+skopos-pricing = { path = "crates/skopos-pricing", version = "0.2.0-beta.4" }
+skopos-collectors = { path = "crates/skopos-collectors", version = "0.2.0-beta.4" }
