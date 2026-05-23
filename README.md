@@ -53,6 +53,7 @@ laptop.
 - [Desktop app](#desktop-app)
 - [Development](#development)
 - [Privacy](#privacy)
+- [Credits](#credits)
 - [License](#license)
 
 ---
@@ -195,7 +196,7 @@ everything below.
 
 ## Install
 
-> **Beta access** — the `D4ffi/skopos` repo is private during the
+> **Beta access** — the `Sadboy-s-Development-Group/skopos` repo is private during the
 > v0.2.0-beta cycle, so every command below that touches GitHub
 > (downloading a release, cloning, `skopos update`) needs a token with
 > read access to this repository. Export it once per shell:
@@ -209,7 +210,7 @@ everything below.
 ### Prebuilt binary (recommended)
 
 Grab the tarball for your platform from the
-[latest release](https://github.com/D4ffi/skopos/releases/latest) and drop
+[latest release](https://github.com/Sadboy-s-Development-Group/skopos/releases/latest) and drop
 the `skopos` binary somewhere on your `PATH`:
 
 ```bash
@@ -217,7 +218,7 @@ curl -sSL \
   -H "Authorization: token $GITHUB_TOKEN" \
   -H "Accept: application/octet-stream" \
   -o skopos.tar.gz \
-  https://api.github.com/repos/D4ffi/skopos/releases/assets/<asset-id>
+  https://api.github.com/repos/Sadboy-s-Development-Group/skopos/releases/assets/<asset-id>
 tar -xzf skopos.tar.gz
 install -m 0755 skopos-*/skopos ~/.local/bin/skopos
 ```
@@ -231,7 +232,7 @@ expands.
 ### From source
 
 ```bash
-git clone https://github.com/D4ffi/skopos.git
+git clone https://github.com/Sadboy-s-Development-Group/skopos.git
 cd skopos
 cargo install --path crates/skopos-cli --locked   # installs `skopos` into ~/.cargo/bin
 ```
@@ -378,6 +379,11 @@ counts, models, timestamps, cost estimates — and **never** prompts, completion
 or any conversation content. There is no telemetry and no network upload; the
 only outbound traffic is the connectivity probe pinging public hosts, and only
 when you run it.
+
+## Credits
+
+Skopos was built by **Kevin Coss** ([@D4ffi](https://github.com/D4ffi)),
+member of the [Sadboys Development Group](https://github.com/Sadboy-s-Development-Group).
 
 ## License
 

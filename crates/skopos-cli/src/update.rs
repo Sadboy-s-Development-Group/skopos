@@ -1,7 +1,7 @@
 //! `skopos update` — pull the latest GitHub Release and replace this binary.
 //!
 //! Wraps [`self_update`] in a Skopos-friendly façade: we always know the
-//! repo (the `D4ffi/skopos` constants below), and we publish prebuilt
+//! repo (the `Sadboy-s-Development-Group/skopos` constants below), and we publish prebuilt
 //! tarballs whose filenames embed the Rust target triple, so
 //! `self_update`'s default asset matcher picks the right artifact by
 //! looking for the running platform's target string. That keeps this
@@ -19,7 +19,7 @@ use self_update::cargo_crate_version;
 use crate::theme::{dim, purple_bold};
 
 /// GitHub owner that publishes Skopos releases.
-const REPO_OWNER: &str = "D4ffi";
+const REPO_OWNER: &str = "Sadboy-s-Development-Group";
 /// GitHub repository name. Combined with `REPO_OWNER` to build the
 /// releases API URL `self_update` queries.
 const REPO_NAME: &str = "skopos";
