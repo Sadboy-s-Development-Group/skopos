@@ -195,19 +195,44 @@ everything below.
 
 ## Install
 
-Skopos is a Rust workspace. Build the CLI and put it on your `PATH`:
+### Prebuilt binary (recommended)
+
+Grab the tarball for your platform from
+[GitHub Releases](https://github.com/D4ffi/skopos/releases/latest) and drop
+the `skopos` binary somewhere on your `PATH`:
+
+```bash
+curl -sSL -o skopos.tar.gz \
+  https://github.com/D4ffi/skopos/releases/latest/download/skopos-0.2.0-beta.1-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf skopos.tar.gz
+install -m 0755 skopos-*/skopos ~/.local/bin/skopos
+```
+
+Linux x86_64 is the first beta target; more platforms land as the matrix
+expands.
+
+### From source
 
 ```bash
 git clone https://github.com/D4ffi/skopos.git
 cd skopos
-cargo install --path crates/skopos-cli      # installs `skopos` into ~/.cargo/bin
+cargo install --path crates/skopos-cli --locked   # installs `skopos` into ~/.cargo/bin
 ```
-
-Prefer not to install? `cargo build --release` leaves the binary at
-`target/release/skopos`.
 
 The pinned toolchain (`rust-toolchain.toml`) is **Rust 1.95.0 stable** —
 `rustup` picks it up automatically.
+
+### Updating
+
+```bash
+skopos update           # pull the latest release and replace the binary in place
+skopos update --check   # only report whether a newer release is out
+skopos --version        # what you're running now
+```
+
+`skopos update` consults the GitHub Releases feed, finds the asset that
+matches your platform, downloads it and atomically swaps the running
+binary. The same command works regardless of how you installed it.
 
 ## Quick start
 
@@ -234,6 +259,8 @@ skopos network               # open the network dashboard
 | `skopos` | Open the interactive shell. |
 | `skopos work` | Pick a project, then `exec` into an agentic CLI inside it. |
 | `skopos status` / `doctor` | Local status and the paths Skopos uses. |
+| `skopos --version` | Print the version Skopos is running. |
+| `skopos update [--check]` | Replace this binary with the latest published release. |
 
 </details>
 
