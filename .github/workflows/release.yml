@@ -59,6 +59,13 @@ jobs:
           mkdir -p "dist/${stage}"
           cp "target/${{ matrix.target }}/release/skopos" "dist/${stage}/"
           cp README.md LICENSE "dist/${stage}/" 2>/dev/null || true
+          # Bundle the launcher icon + Desktop Entry so install.sh can
+          # register Skopos with XDG-compliant launchers (Walker, rofi,
+          # krunner, wofi, …). The PNG is renamed to `skopos.png` so it
+          # matches the `Icon=skopos` line in the desktop file once
+          # placed under hicolor/512x512/apps.
+          cp docs/skopos-logo.png "dist/${stage}/skopos.png"
+          cp packaging/skopos.desktop "dist/${stage}/"
           tar -C dist -czf "dist/${stage}.tar.gz" "${stage}"
           # Checksum filename intentionally drops `.tar.gz` so it doesn't
           # collide with the tarball when `skopos update` matches assets by

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Skopos
+GenericName=Developer Workspace
+Comment=The unified workspace for developers — projects, AI usage, machine health.
+Exec=skopos
+Icon=skopos
+Terminal=true
+Categories=Development;Utility;ConsoleOnly;
+Keywords=skopos;ai;observability;usage;tokens;projects;terminal;tui;rust;
+StartupNotify=false

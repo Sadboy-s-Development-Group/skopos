@@ -93,6 +93,36 @@ install -m 0755 "$tmpdir/skopos-${version}-${target}/skopos" "$INSTALL_DIR/skopo
 
 log "Installed skopos $version to $INSTALL_DIR/skopos"
 
+# XDG launcher integration. Drops the icon and a Desktop Entry so
+# spotlight-style launchers (Walker, rofi, krunner, wofi, GNOME activities,
+# KDE krunner, …) pick Skopos up with the correct mark. Best-effort —
+# missing source files (older tarballs) or missing cache tools never fail
+# the install. Opt out with `SKOPOS_NO_DESKTOP=1`.
+if [ "${SKOPOS_NO_DESKTOP:-0}" != "1" ]; then
+  data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  icon_dir="$data_home/icons/hicolor/512x512/apps"
+  apps_dir="$data_home/applications"
+  src_icon="$tmpdir/skopos-${version}-${target}/skopos.png"
+  src_desk="$tmpdir/skopos-${version}-${target}/skopos.desktop"
+
+  if [ -f "$src_icon" ] && [ -f "$src_desk" ]; then
+    mkdir -p "$icon_dir" "$apps_dir"
+    install -m 0644 "$src_icon" "$icon_dir/skopos.png"
+    # Rewrite Exec= to the absolute path. Some launchers don't source
+    # the user's shell rc files, so a bare `Exec=skopos` can fail when
+    # ~/.local/bin isn't on the launcher's PATH.
+    sed "s|^Exec=.*|Exec=$INSTALL_DIR/skopos|" "$src_desk" \
+      > "$apps_dir/skopos.desktop"
+    chmod 0644 "$apps_dir/skopos.desktop"
+    log "Installed launcher icon + Desktop Entry"
+
+    command -v update-desktop-database >/dev/null 2>&1 \
+      && update-desktop-database "$apps_dir" >/dev/null 2>&1 || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 \
+      && gtk-update-icon-cache -q -t "$data_home/icons/hicolor" >/dev/null 2>&1 || true
+  fi
+fi
+
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) printf '\n  Note: %s is not on your $PATH. Add it with:\n\n    export PATH="%s:$PATH"\n\n' \

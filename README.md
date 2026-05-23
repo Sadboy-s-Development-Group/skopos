@@ -1,5 +1,7 @@
 <div align="center">
 
+<img alt="Skopos" src="docs/skopos-logo.png" width="128" height="128">
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/banner-dark.svg">
   <img alt="SKOPOS" src="docs/banner-light.svg" width="620">
